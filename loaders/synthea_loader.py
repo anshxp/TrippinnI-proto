@@ -17,7 +17,11 @@ class SyntheaLoader(BaseLoader):
 
         self.dataset_path = Path(dataset_path)
 
+        # Table name -> CSV file path
         self.tables = {}
+
+        # Loaded DataFrames cache
+        self.cache = {}
 
     def load(self):
 
@@ -32,9 +36,10 @@ class SyntheaLoader(BaseLoader):
 
             table_name = file.stem.lower()
 
-            self.tables[table_name] = pd.read_csv(file)
+            # Store only the file path
+            self.tables[table_name] = file
 
-        print(f"Loaded {len(self.tables)} tables.")
+        print(f"Registered {len(self.tables)} tables.")
 
     def get_tables(self):
 
@@ -43,15 +48,27 @@ class SyntheaLoader(BaseLoader):
     def get_dataframe(self, table_name):
 
         if table_name not in self.tables:
-            raise ValueError(f"{table_name} not loaded.")
+            raise ValueError(f"{table_name} not found.")
 
-        return self.tables[table_name]
+        # Return cached DataFrame if already loaded
+        if table_name in self.cache:
+            return self.cache[table_name]
+
+        # Load from disk
+        df = pd.read_csv(self.tables[table_name])
+
+        # Store in cache
+        self.cache[table_name] = df
+
+        return df
 
     def get_schema(self):
 
         schema = {}
 
-        for name, df in self.tables.items():
+        for name in self.tables:
+
+            df = self.get_dataframe(name)
 
             schema[name] = {
 
