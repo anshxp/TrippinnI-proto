@@ -4,7 +4,7 @@ from profiling.column_profiler import ColumnProfiler
 from profiling.memory_profiler import MemoryProfiler
 from profiling.key_detector import KeyDetector
 from profiling.report_builder import ReportBuilder
-
+from profiling.report_writer import ReportWriter
 
 class DatasetProfilerEngine:
 
@@ -23,6 +23,8 @@ class DatasetProfilerEngine:
         self.keys = KeyDetector()
 
         self.builder = ReportBuilder()
+        
+        self.writer = ReportWriter()
 
     #################################################################
 
