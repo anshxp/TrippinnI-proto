@@ -37,6 +37,7 @@ class Orchestrator:
         print("Dataset initialized.")
 
         # Profile Every Table
+        self._profile_tables()
 
     ##################################################################
 
