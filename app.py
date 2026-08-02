@@ -4,7 +4,7 @@ pipeline = Pipeline()
 
 pipeline.run(
     dataset_type="mimic",
-    dataset_path="data/raw/mimic"
+    dataset_path="data/raw/mimiciv"
 )
 
 orchestrator = pipeline.orchestrator
