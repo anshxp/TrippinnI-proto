@@ -1,0 +1,152 @@
+{
+    "dataset": {
+        "table_name": "conditions",
+        "rows": 1143900,
+        "columns": 6,
+        "shape": [
+            1143900,
+            6
+        ],
+        "memory_usage": 404825943,
+        "duplicate_rows": 0,
+        "missing_cells": 516578,
+        "missing_percentage": 7.53,
+        "numeric_columns": 1,
+        "categorical_columns": 5,
+        "datetime_columns": 0,
+        "boolean_columns": 0
+    },
+    "columns": {
+        "START": {
+            "name": "START",
+            "pandas_dtype": "str",
+            "semantic_type": "datetime",
+            "memory_usage": 67490232,
+            "unique_values": 33191,
+            "null_count": 0,
+            "null_percentage": 0.0,
+            "statistics": {
+                "count": 1143900,
+                "missing": 0,
+                "missing_percentage": 0.0,
+                "unique": 2084,
+                "top": "2020-03-07",
+                "frequency": 44142
+            }
+        },
+        "STOP": {
+            "name": "STOP",
+            "pandas_dtype": "str",
+            "semantic_type": "datetime",
+            "memory_usage": 53542626,
+            "unique_values": 12080,
+            "null_count": 516578,
+            "null_percentage": 45.16,
+            "statistics": {
+                "count": 627322,
+                "missing": 516578,
+                "missing_percentage": 45.16,
+                "unique": 391,
+                "top": "2020-03-24",
+                "frequency": 16001
+            }
+        },
+        "PATIENT": {
+            "name": "PATIENT",
+            "pandas_dtype": "str",
+            "semantic_type": "identifier",
+            "memory_usage": 97231632,
+            "unique_values": 122198,
+            "null_count": 0,
+            "null_percentage": 0.0,
+            "statistics": {
+                "count": 1143900,
+                "missing": 0,
+                "missing_percentage": 0.0,
+                "unique": 4882,
+                "top": "618d0747-4332-48c4-b298-f2a143242e52",
+                "frequency": 24
+            }
+        },
+        "ENCOUNTER": {
+            "name": "ENCOUNTER",
+            "pandas_dtype": "str",
+            "semantic_type": "identifier",
+            "memory_usage": 97231632,
+            "unique_values": 547692,
+            "null_count": 0,
+            "null_percentage": 0.0,
+            "statistics": {
+                "count": 1143900,
+                "missing": 0,
+                "missing_percentage": 0.0,
+                "unique": 4960,
+                "top": "0359687c-9fbb-4240-8131-55427ee18f38",
+                "frequency": 5
+            }
+        },
+        "CODE": {
+            "name": "CODE",
+            "pandas_dtype": "int64",
+            "semantic_type": "medical_code",
+            "memory_usage": 9151332,
+            "unique_values": 189,
+            "null_count": 0,
+            "null_percentage": 0.0,
+            "statistics": {
+                "count": 1143900,
+                "missing": 0,
+                "missing_percentage": 0.0,
+                "mean": 2418701427710.3276,
+                "median": 196416002.0,
+                "mode": 840544004.0,
+                "minimum": 1734006.0,
+                "maximum": 368581000119106.0,
+                "range": 368580998385100.0,
+                "variance": 5.3606538742189225e+26,
+                "std": 23153085915745.492,
+                "q1": 55822004.0,
+                "q2": 196416002.0,
+                "q3": 389087006.0,
+                "iqr": 333265002.0
+            }
+        },
+        "DESCRIPTION": {
+            "name": "DESCRIPTION",
+            "pandas_dtype": "str",
+            "semantic_type": "categorical",
+            "memory_usage": 80179149,
+            "unique_values": 191,
+            "null_count": 0,
+            "null_percentage": 0.0,
+            "statistics": {
+                "count": 1143900,
+                "missing": 0,
+                "missing_percentage": 0.0,
+                "unique": 154,
+                "top": "Suspected COVID-19",
+                "frequency": 91039
+            }
+        }
+    },
+    "memory": {
+        "total_memory_bytes": 404825943,
+        "total_memory_mb": 386.07,
+        "average_row_size_bytes": 353.9,
+        "column_memory": {
+            "START": 67490232,
+            "STOP": 53542626,
+            "PATIENT": 97231632,
+            "ENCOUNTER": 97231632,
+            "CODE": 9151332,
+            "DESCRIPTION": 80179149
+        }
+    },
+    "keys": {
+        "primary_keys": [],
+        "foreign_keys": [
+            "PATIENT",
+            "ENCOUNTER"
+        ]
+    }
+}

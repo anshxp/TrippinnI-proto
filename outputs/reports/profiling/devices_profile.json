@@ -1,0 +1,172 @@
+{
+    "dataset": {
+        "table_name": "devices",
+        "rows": 23694,
+        "columns": 7,
+        "shape": [
+            23694,
+            7
+        ],
+        "memory_usage": 11779947,
+        "duplicate_rows": 0,
+        "missing_cells": 8692,
+        "missing_percentage": 5.24,
+        "numeric_columns": 1,
+        "categorical_columns": 6,
+        "datetime_columns": 0,
+        "boolean_columns": 0
+    },
+    "columns": {
+        "START": {
+            "name": "START",
+            "pandas_dtype": "str",
+            "semantic_type": "datetime",
+            "memory_usage": 1398078,
+            "unique_values": 7244,
+            "null_count": 0,
+            "null_percentage": 0.0,
+            "statistics": {
+                "count": 23694,
+                "missing": 0,
+                "missing_percentage": 0.0,
+                "unique": 1830,
+                "top": "2020-03-15",
+                "frequency": 928
+            }
+        },
+        "STOP": {
+            "name": "STOP",
+            "pandas_dtype": "str",
+            "semantic_type": "datetime",
+            "memory_usage": 1163394,
+            "unique_values": 66,
+            "null_count": 8692,
+            "null_percentage": 36.68,
+            "statistics": {
+                "count": 15002,
+                "missing": 8692,
+                "missing_percentage": 36.68,
+                "unique": 59,
+                "top": "2020-03-17",
+                "frequency": 835
+            }
+        },
+        "PATIENT": {
+            "name": "PATIENT",
+            "pandas_dtype": "str",
+            "semantic_type": "identifier",
+            "memory_usage": 2014122,
+            "unique_values": 11038,
+            "null_count": 0,
+            "null_percentage": 0.0,
+            "statistics": {
+                "count": 23694,
+                "missing": 0,
+                "missing_percentage": 0.0,
+                "unique": 3507,
+                "top": "2028d966-6494-42a1-813b-d67418dfdaf1",
+                "frequency": 13
+            }
+        },
+        "ENCOUNTER": {
+            "name": "ENCOUNTER",
+            "pandas_dtype": "str",
+            "semantic_type": "identifier",
+            "memory_usage": 2014122,
+            "unique_values": 11657,
+            "null_count": 0,
+            "null_percentage": 0.0,
+            "statistics": {
+                "count": 23694,
+                "missing": 0,
+                "missing_percentage": 0.0,
+                "unique": 3580,
+                "top": "4362ca3e-3499-4e53-9386-021bb8c97c89",
+                "frequency": 12
+            }
+        },
+        "CODE": {
+            "name": "CODE",
+            "pandas_dtype": "int64",
+            "semantic_type": "medical_code",
+            "memory_usage": 189684,
+            "unique_values": 6,
+            "null_count": 0,
+            "null_percentage": 0.0,
+            "statistics": {
+                "count": 23694,
+                "missing": 0,
+                "missing_percentage": 0.0,
+                "mean": 256405835.79344982,
+                "median": 72506001.0,
+                "mode": 36965003.0,
+                "minimum": 36965003.0,
+                "maximum": 706004007.0,
+                "range": 669039004.0,
+                "variance": 6.80640621948132e+16,
+                "std": 260890900.94292903,
+                "q1": 36965003.0,
+                "q2": 72506001.0,
+                "q3": 449071006.0,
+                "iqr": 412106003.0
+            }
+        },
+        "DESCRIPTION": {
+            "name": "DESCRIPTION",
+            "pandas_dtype": "str",
+            "semantic_type": "categorical",
+            "memory_usage": 2203909,
+            "unique_values": 6,
+            "null_count": 0,
+            "null_percentage": 0.0,
+            "statistics": {
+                "count": 23694,
+                "missing": 0,
+                "missing_percentage": 0.0,
+                "unique": 6,
+                "top": "Hemodialysis machine  device (physical object)",
+                "frequency": 9175
+            }
+        },
+        "UDI": {
+            "name": "UDI",
+            "pandas_dtype": "str",
+            "semantic_type": "text",
+            "memory_usage": 2797430,
+            "unique_values": 23694,
+            "null_count": 0,
+            "null_percentage": 0.0,
+            "statistics": {
+                "count": 23694,
+                "missing": 0,
+                "missing_percentage": 0.0,
+                "unique": 5000,
+                "top": "(01)10001991786916(11)200225(17)450311(10)301213698190(21)748174",
+                "frequency": 1
+            }
+        }
+    },
+    "memory": {
+        "total_memory_bytes": 11779947,
+        "total_memory_mb": 11.23,
+        "average_row_size_bytes": 497.17,
+        "column_memory": {
+            "START": 1398078,
+            "STOP": 1163394,
+            "PATIENT": 2014122,
+            "ENCOUNTER": 2014122,
+            "CODE": 189684,
+            "DESCRIPTION": 2203909,
+            "UDI": 2797430
+        }
+    },
+    "keys": {
+        "primary_keys": [
+            "UDI"
+        ],
+        "foreign_keys": [
+            "PATIENT",
+            "ENCOUNTER"
+        ]
+    }
+}

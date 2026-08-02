@@ -16,8 +16,6 @@ class Orchestrator:
 
         self.profiler = DatasetProfilerEngine()
 
-        self.loader = None
-
         self.profiles = {}
 
     ##################################################################
@@ -28,15 +26,14 @@ class Orchestrator:
         dataset_path
     ):
 
-        # Load Dataset
-        self.loader = self.loader_manager.initialize(
+        # Initialize loader
+        self.loader_manager.initialize(
             dataset_type,
             dataset_path
         )
 
         print("Dataset initialized.")
 
-        # Profile Every Table
         self._profile_tables()
 
     ##################################################################
@@ -45,9 +42,11 @@ class Orchestrator:
 
         self.profiles = {}
 
-        for table in self.loader.get_tables():
+        loader = self.loader_manager.get_loader()
 
-            dataframe = self.loader.get_dataframe(table)
+        for table in loader.get_tables():
+
+            dataframe = loader.get_dataframe(table)
 
             self.profiles[table] = self.profiler.profile(
                 table,
@@ -60,7 +59,7 @@ class Orchestrator:
 
     def get_tables(self):
 
-        return self.loader.get_tables()
+        return self.loader_manager.get_tables()
 
     ##################################################################
 
@@ -69,13 +68,13 @@ class Orchestrator:
         table
     ):
 
-        return self.loader.get_dataframe(table)
+        return self.loader_manager.get_dataframe(table)
 
     ##################################################################
 
     def get_schema(self):
 
-        return self.loader.get_schema()
+        return self.loader_manager.get_schema()
 
     ##################################################################
 
@@ -91,11 +90,3 @@ class Orchestrator:
     ):
 
         return self.profiles.get(table)
-
-        
-
-
-
-
-
-       

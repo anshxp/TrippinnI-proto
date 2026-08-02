@@ -1,85 +1,138 @@
-"""
-synthea_loader.py
-
-Loads Synthea CSV datasets.
-"""
+from __future__ import annotations
 
 from pathlib import Path
 
 import pandas as pd
 
 from loaders.base_loader import BaseLoader
+from loaders.catalog.dataset_catalog import DatasetCatalog
+from loaders.manifest.dataset_manifest import DatasetManifest
+from loaders.readers.csv_reader import CsvReader
+from loaders.discovery.flat_discovery import FlatDiscovery
+from loaders.validator.dataset_validator import DatasetValidator
 
 
 class SyntheaLoader(BaseLoader):
+    """
+    Loader for Synthea datasets.
 
-    def __init__(self, dataset_path: str):
+    Supports:
+        - CSV
+        - CSV.GZ
 
-        self.dataset_path = Path(dataset_path)
+    Directory layout:
 
-        # Table name -> CSV file path
-        self.tables = {}
+        synthea/
+            patients.csv
+            encounters.csv
+            medications.csv
+            ...
+    """
 
-        # Loaded DataFrames cache
-        self.cache = {}
+    def __init__(
+        self,
+        manifest: DatasetManifest,
+        validator: DatasetValidator,
+        discovery: FlatDiscovery,
+        readers: dict[str, object],
+        catalog: DatasetCatalog,
+    ):
+        self.manifest = manifest
+        self.validator = validator
+        self.discovery = discovery
+        self.catalog = catalog
 
-    def load(self):
+        self.reader: CsvReader = readers["csv"]
 
-        csv_files = list(self.dataset_path.glob("*.csv"))
+    # -------------------------------------------------------
+    # Discovery
+    # -------------------------------------------------------
 
-        if len(csv_files) == 0:
-            raise FileNotFoundError(
-                f"No CSV files found inside {self.dataset_path}"
+    def load(self) -> None:
+        """
+        Discover dataset files.
+
+        No CSV is loaded into memory here.
+        """
+
+        self.validator.validate(self.manifest)
+
+        files = self.discovery.discover(
+            self.manifest.root_path
+        )
+
+        for file in files:
+
+            if not self.reader.supports(file):
+                continue
+
+            table_name = file.stem
+
+            # Handle .csv.gz correctly
+            if table_name.endswith(".csv"):
+                table_name = Path(table_name).stem
+
+            self.catalog.register_table(
+                table_name.lower(),
+                file,
             )
 
-        for file in csv_files:
+    # -------------------------------------------------------
+    # Tables
+    # -------------------------------------------------------
 
-            table_name = file.stem.lower()
+    def get_tables(self) -> list[str]:
+        return self.catalog.get_tables()
 
-            # Store only the file path
-            self.tables[table_name] = file
+    # -------------------------------------------------------
+    # Lazy Loading
+    # -------------------------------------------------------
 
-        print(f"Registered {len(self.tables)} tables.")
+    def get_dataframe(
+        self,
+        table_name: str,
+    ) -> pd.DataFrame:
 
-    def get_tables(self):
+        table_name = table_name.lower()
 
-        return list(self.tables.keys())
+        if self.catalog.is_cached(table_name):
+            return self.catalog.get_cached_dataframe(
+                table_name
+            )
 
-    def get_dataframe(self, table_name):
+        file_path = self.catalog.get_table_path(
+            table_name
+        )
 
-        if table_name not in self.tables:
-            raise ValueError(f"{table_name} not found.")
+        dataframe = self.reader.read(file_path)
 
-        # Return cached DataFrame if already loaded
-        if table_name in self.cache:
-            return self.cache[table_name]
+        self.catalog.cache_dataframe(
+            table_name,
+            dataframe,
+        )
 
-        # Load from disk
-        df = pd.read_csv(self.tables[table_name])
+        return dataframe
 
-        # Store in cache
-        self.cache[table_name] = df
+    # -------------------------------------------------------
+    # Schema
+    # -------------------------------------------------------
 
-        return df
-
-    def get_schema(self):
+    def get_schema(self) -> dict:
 
         schema = {}
 
-        for name in self.tables:
+        for table in self.get_tables():
 
-            df = self.get_dataframe(name)
+            df = self.get_dataframe(table)
 
-            schema[name] = {
-
+            schema[table] = {
                 "rows": len(df),
-
                 "columns": list(df.columns),
-
                 "shape": df.shape,
-
-                "dtypes": df.dtypes.astype(str).to_dict(),
-
+                "dtypes": {
+                    c: str(t)
+                    for c, t in df.dtypes.items()
+                },
             }
 
         return schema

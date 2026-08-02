@@ -3,8 +3,8 @@ from core.pipeline import Pipeline
 pipeline = Pipeline()
 
 pipeline.run(
-    dataset_type="synthea",
-    dataset_path="data/raw/synthea"
+    dataset_type="mimic",
+    dataset_path="data/raw/mimic"
 )
 
 orchestrator = pipeline.orchestrator

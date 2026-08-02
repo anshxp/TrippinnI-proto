@@ -1,0 +1,217 @@
+{
+    "dataset": {
+        "table_name": "careplans",
+        "rows": 377726,
+        "columns": 9,
+        "shape": [
+            377726,
+            9
+        ],
+        "memory_usage": 198152441,
+        "duplicate_rows": 0,
+        "missing_cells": 237926,
+        "missing_percentage": 7.0,
+        "numeric_columns": 2,
+        "categorical_columns": 7,
+        "datetime_columns": 0,
+        "boolean_columns": 0
+    },
+    "columns": {
+        "Id": {
+            "name": "Id",
+            "pandas_dtype": "str",
+            "semantic_type": "identifier",
+            "memory_usage": 32106842,
+            "unique_values": 377726,
+            "null_count": 0,
+            "null_percentage": 0.0,
+            "statistics": {
+                "count": 377726,
+                "missing": 0,
+                "missing_percentage": 0.0,
+                "unique": 5000,
+                "top": "00079796-1c9d-4a8c-b232-a149f851010e",
+                "frequency": 1
+            }
+        },
+        "START": {
+            "name": "START",
+            "pandas_dtype": "str",
+            "semantic_type": "datetime",
+            "memory_usage": 22285966,
+            "unique_values": 30912,
+            "null_count": 0,
+            "null_percentage": 0.0,
+            "statistics": {
+                "count": 377726,
+                "missing": 0,
+                "missing_percentage": 0.0,
+                "unique": 2646,
+                "top": "2020-03-07",
+                "frequency": 11324
+            }
+        },
+        "STOP": {
+            "name": "STOP",
+            "pandas_dtype": "str",
+            "semantic_type": "datetime",
+            "memory_usage": 17495788,
+            "unique_values": 14980,
+            "null_count": 177414,
+            "null_percentage": 46.97,
+            "statistics": {
+                "count": 200312,
+                "missing": 177414,
+                "missing_percentage": 46.97,
+                "unique": 801,
+                "top": "2020-03-10",
+                "frequency": 5268
+            }
+        },
+        "PATIENT": {
+            "name": "PATIENT",
+            "pandas_dtype": "str",
+            "semantic_type": "identifier",
+            "memory_usage": 32106842,
+            "unique_values": 118121,
+            "null_count": 0,
+            "null_percentage": 0.0,
+            "statistics": {
+                "count": 377726,
+                "missing": 0,
+                "missing_percentage": 0.0,
+                "unique": 4906,
+                "top": "25395832-e49e-41f0-8c0f-0cba482f9e45",
+                "frequency": 5
+            }
+        },
+        "ENCOUNTER": {
+            "name": "ENCOUNTER",
+            "pandas_dtype": "str",
+            "semantic_type": "identifier",
+            "memory_usage": 32106842,
+            "unique_values": 306025,
+            "null_count": 0,
+            "null_percentage": 0.0,
+            "statistics": {
+                "count": 377726,
+                "missing": 0,
+                "missing_percentage": 0.0,
+                "unique": 4986,
+                "top": "1cf0f273-180f-403d-9a7c-484c325ce3af",
+                "frequency": 2
+            }
+        },
+        "CODE": {
+            "name": "CODE",
+            "pandas_dtype": "int64",
+            "semantic_type": "medical_code",
+            "memory_usage": 3021940,
+            "unique_values": 36,
+            "null_count": 0,
+            "null_percentage": 0.0,
+            "statistics": {
+                "count": 377726,
+                "missing": 0,
+                "missing_percentage": 0.0,
+                "mean": 1653913856267.0193,
+                "median": 736252007.0,
+                "mode": 736376001.0,
+                "minimum": 47387005.0,
+                "maximum": 869761000000107.0,
+                "range": 869760952613102.0,
+                "variance": 1.4046857586916847e+27,
+                "std": 37479137646051.63,
+                "q1": 443402002.0,
+                "q2": 736252007.0,
+                "q3": 736376001.0,
+                "iqr": 292973999.0
+            }
+        },
+        "DESCRIPTION": {
+            "name": "DESCRIPTION",
+            "pandas_dtype": "str",
+            "semantic_type": "categorical",
+            "memory_usage": 32352878,
+            "unique_values": 37,
+            "null_count": 0,
+            "null_percentage": 0.0,
+            "statistics": {
+                "count": 377726,
+                "missing": 0,
+                "missing_percentage": 0.0,
+                "unique": 32,
+                "top": "Infectious disease care plan (record artifact)",
+                "frequency": 161575
+            }
+        },
+        "REASONCODE": {
+            "name": "REASONCODE",
+            "pandas_dtype": "float64",
+            "semantic_type": "medical_code",
+            "memory_usage": 3021940,
+            "unique_values": 74,
+            "null_count": 30256,
+            "null_percentage": 8.01,
+            "statistics": {
+                "count": 347470,
+                "missing": 30256,
+                "missing_percentage": 8.01,
+                "mean": 53906530860.0414,
+                "median": 239873007.0,
+                "mode": 840544004.0,
+                "minimum": 1734006.0,
+                "maximum": 67811000119102.0,
+                "range": 67810998385096.0,
+                "variance": 3.6231528419368167e+24,
+                "std": 1903458127182.4229,
+                "q1": 55822004.0,
+                "q2": 239873007.0,
+                "q3": 840544004.0,
+                "iqr": 784722000.0
+            }
+        },
+        "REASONDESCRIPTION": {
+            "name": "REASONDESCRIPTION",
+            "pandas_dtype": "str",
+            "semantic_type": "categorical",
+            "memory_usage": 23654459,
+            "unique_values": 75,
+            "null_count": 30256,
+            "null_percentage": 8.01,
+            "statistics": {
+                "count": 347470,
+                "missing": 30256,
+                "missing_percentage": 8.01,
+                "unique": 63,
+                "top": "Suspected COVID-19",
+                "frequency": 91039
+            }
+        }
+    },
+    "memory": {
+        "total_memory_bytes": 198152441,
+        "total_memory_mb": 188.97,
+        "average_row_size_bytes": 524.59,
+        "column_memory": {
+            "Id": 32106842,
+            "START": 22285966,
+            "STOP": 17495788,
+            "PATIENT": 32106842,
+            "ENCOUNTER": 32106842,
+            "CODE": 3021940,
+            "DESCRIPTION": 32352878,
+            "REASONCODE": 3021940,
+            "REASONDESCRIPTION": 23654459
+        }
+    },
+    "keys": {
+        "primary_keys": [
+            "Id"
+        ],
+        "foreign_keys": [
+            "PATIENT",
+            "ENCOUNTER"
+        ]
+    }
+}

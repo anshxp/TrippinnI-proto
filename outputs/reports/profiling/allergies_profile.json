@@ -1,0 +1,152 @@
+{
+    "dataset": {
+        "table_name": "allergies",
+        "rows": 51592,
+        "columns": 6,
+        "shape": [
+            51592,
+            6
+        ],
+        "memory_usage": 17415870,
+        "duplicate_rows": 0,
+        "missing_cells": 51028,
+        "missing_percentage": 16.48,
+        "numeric_columns": 1,
+        "categorical_columns": 5,
+        "datetime_columns": 0,
+        "boolean_columns": 0
+    },
+    "columns": {
+        "START": {
+            "name": "START",
+            "pandas_dtype": "str",
+            "semantic_type": "datetime",
+            "memory_usage": 3044060,
+            "unique_values": 11516,
+            "null_count": 0,
+            "null_percentage": 0.0,
+            "statistics": {
+                "count": 51592,
+                "missing": 0,
+                "missing_percentage": 0.0,
+                "unique": 3748,
+                "top": "1977-12-20",
+                "frequency": 12
+            }
+        },
+        "STOP": {
+            "name": "STOP",
+            "pandas_dtype": "str",
+            "semantic_type": "datetime",
+            "memory_usage": 1666304,
+            "unique_values": 186,
+            "null_count": 51028,
+            "null_percentage": 98.91,
+            "statistics": {
+                "count": 564,
+                "missing": 51028,
+                "missing_percentage": 98.91,
+                "unique": 186,
+                "top": "2020-05-10",
+                "frequency": 12
+            }
+        },
+        "PATIENT": {
+            "name": "PATIENT",
+            "pandas_dtype": "str",
+            "semantic_type": "identifier",
+            "memory_usage": 4385452,
+            "unique_values": 14512,
+            "null_count": 0,
+            "null_percentage": 0.0,
+            "statistics": {
+                "count": 51592,
+                "missing": 0,
+                "missing_percentage": 0.0,
+                "unique": 4053,
+                "top": "3f45fbeb-992c-445b-9301-74cdcbc07102",
+                "frequency": 8
+            }
+        },
+        "ENCOUNTER": {
+            "name": "ENCOUNTER",
+            "pandas_dtype": "str",
+            "semantic_type": "identifier",
+            "memory_usage": 4385452,
+            "unique_values": 14512,
+            "null_count": 0,
+            "null_percentage": 0.0,
+            "statistics": {
+                "count": 51592,
+                "missing": 0,
+                "missing_percentage": 0.0,
+                "unique": 4053,
+                "top": "10233319-7d52-4690-9d35-cb9e0fe39ae6",
+                "frequency": 8
+            }
+        },
+        "CODE": {
+            "name": "CODE",
+            "pandas_dtype": "int64",
+            "semantic_type": "medical_code",
+            "memory_usage": 412868,
+            "unique_values": 15,
+            "null_count": 0,
+            "null_percentage": 0.0,
+            "statistics": {
+                "count": 51592,
+                "missing": 0,
+                "missing_percentage": 0.0,
+                "mean": 320879781.31212205,
+                "median": 417532002.0,
+                "mode": 419474003.0,
+                "minimum": 91930004.0,
+                "maximum": 714035009.0,
+                "range": 622105005.0,
+                "variance": 1.5374282425419588e+16,
+                "std": 123993074.10262716,
+                "q1": 232347008.0,
+                "q2": 417532002.0,
+                "q3": 419474003.0,
+                "iqr": 187126995.0
+            }
+        },
+        "DESCRIPTION": {
+            "name": "DESCRIPTION",
+            "pandas_dtype": "str",
+            "semantic_type": "categorical",
+            "memory_usage": 3522394,
+            "unique_values": 15,
+            "null_count": 0,
+            "null_percentage": 0.0,
+            "statistics": {
+                "count": 51592,
+                "missing": 0,
+                "missing_percentage": 0.0,
+                "unique": 15,
+                "top": "Allergy to mould",
+                "frequency": 7034
+            }
+        }
+    },
+    "memory": {
+        "total_memory_bytes": 17415870,
+        "total_memory_mb": 16.61,
+        "average_row_size_bytes": 337.57,
+        "column_memory": {
+            "START": 3044060,
+            "STOP": 1666304,
+            "PATIENT": 4385452,
+            "ENCOUNTER": 4385452,
+            "CODE": 412868,
+            "DESCRIPTION": 3522394
+        }
+    },
+    "keys": {
+        "primary_keys": [],
+        "foreign_keys": [
+            "PATIENT",
+            "ENCOUNTER"
+        ]
+    }
+}
