@@ -93,6 +93,33 @@ class DatatypeProfiler:
 
         return "text"
 
+    def infer_streaming(
+        self,
+        column_name: str,
+        pandas_dtype: str,
+        sample: pd.Series,
+        non_null_count: int,
+        unique_count: int,
+    ) -> str:
+        """Infer a semantic type from bounded streaming state."""
+
+        name = column_name.lower()
+        if self._contains_keyword(name, self.IDENTIFIER_KEYWORDS):
+            return "identifier"
+        if self._contains_keyword(name, self.DATE_KEYWORDS):
+            return "datetime"
+        if self._contains_keyword(name, self.CODE_KEYWORDS):
+            return "medical_code"
+        if pd.api.types.is_numeric_dtype(pandas_dtype):
+            return "numeric"
+        if self._is_boolean(sample):
+            return "boolean"
+        if self._is_datetime(sample):
+            return "datetime"
+        if unique_count / max(non_null_count, 1) < 0.20:
+            return "categorical"
+        return "text"
+
     ################################################################
 
     def _contains_keyword(self, name, keywords):

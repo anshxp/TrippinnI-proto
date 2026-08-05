@@ -106,6 +106,23 @@ class MimicLoader(BaseLoader):
 
     ##################################################################
 
+    def get_dataframe_chunks(
+        self,
+        table_name: str,
+        chunksize: int = 100000,
+    ):
+        """Yield uncached DataFrame chunks for a MIMIC table.
+
+        This deliberately bypasses the DataFrame cache: requesting streamed
+        data must not change the existing lazy-loading behaviour of
+        :meth:`get_dataframe`.
+        """
+
+        file_path = self.catalog.get_table_path(table_name.lower())
+        return self.reader.read_chunks(file_path, chunksize=chunksize)
+
+    ##################################################################
+
     def get_schema(self):
 
         schema = {}

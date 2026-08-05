@@ -81,3 +81,26 @@ class DatasetProfilerEngine:
             report
         )
         return report
+
+    def profile_chunks(self, table_name, chunks):
+        """Profile a chunk iterator in one pass without concatenating it."""
+
+        dataset_state = self.dataset.start_streaming(table_name)
+        column_state = self.columns.start_streaming()
+        memory_state = self.memory.start_streaming()
+        key_state = self.keys.start_streaming()
+
+        for chunk in chunks:
+            self.dataset.update_streaming(dataset_state, chunk)
+            self.columns.update_streaming(column_state, chunk)
+            self.memory.update_streaming(memory_state, chunk)
+            self.keys.update_streaming(key_state, chunk)
+
+        report = self.builder.build(
+            self.dataset.finalize_streaming(dataset_state),
+            self.columns.finalize_streaming(column_state),
+            self.memory.finalize_streaming(memory_state),
+            self.keys.finalize_streaming(key_state),
+        )
+        self.writer.save(table_name, report)
+        return report

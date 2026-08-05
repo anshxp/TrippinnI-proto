@@ -45,13 +45,19 @@ class Orchestrator:
         loader = self.loader_manager.get_loader()
 
         for table in loader.get_tables():
-
-            dataframe = loader.get_dataframe(table)
-
-            self.profiles[table] = self.profiler.profile(
-                table,
-                dataframe
-            )
+            # MIMIC exposes chunked CSV reads. Other loaders deliberately
+            # retain their established DataFrame-based, lazy-loading path.
+            if hasattr(loader, "get_dataframe_chunks"):
+                self.profiles[table] = self.profiler.profile_chunks(
+                    table,
+                    loader.get_dataframe_chunks(table),
+                )
+            else:
+                dataframe = loader.get_dataframe(table)
+                self.profiles[table] = self.profiler.profile(
+                    table,
+                    dataframe
+                )
 
         print("Dataset profiling completed.")
 
