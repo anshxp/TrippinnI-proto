@@ -1,6 +1,7 @@
 data/raw/synthea/*
-venv/__pycache__/
-*.pyc
+
+# Virtual environment
+venv/
 
 # Python cache
 __pycache__/

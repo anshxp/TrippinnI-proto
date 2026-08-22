@@ -25,6 +25,13 @@ class MimicLoader(BaseLoader):
         *.csv.gz
 
     DataFrames are loaded lazily.
+
+    Point dataset_path directly at the version folder (e.g.
+    data/raw/mimiciv/3.1), not its parent. Discovery is recursive so it
+    finds files either way, but table names are built from every
+    directory between dataset_path and the file - pointing at the
+    parent produces names like "3.1_hosp_admissions" instead of the
+    clean "hosp_admissions".
     """
 
     def __init__(
@@ -49,7 +56,7 @@ class MimicLoader(BaseLoader):
 
     def load(self):
 
-        self.validator.validate(self.manifest)
+        self.validator.validate(self.manifest, self.discovery)
 
         files = self.discovery.discover(
             self.manifest.root_path
