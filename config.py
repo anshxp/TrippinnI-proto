@@ -6,7 +6,9 @@ LLM_MODEL = "Qwen/Qwen3-4B-Instruct"
 
 MAX_NEW_TOKENS = 512
 
-TEMPERATURE = 0.2"""
+TEMPERATURE = 0.2
+
+"""
 Rule Validator.
 
 Applies deterministic healthcare validation rules.
