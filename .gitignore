@@ -1,2 +1,3 @@
 data/raw/synthea/*
-venv/
+venv/__pycache__/
+*.pyc
