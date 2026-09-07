@@ -15,7 +15,10 @@ class ColumnProfiler:
         self.datatype = DatatypeProfiler()
 
     def profile(self, dataframe: pd.DataFrame) -> dict:
-        return {column: self.profile_column(column, dataframe[column]) for column in dataframe.columns}
+        return {
+            column: self.profile_column(column, dataframe[column])
+            for column in dataframe.columns
+        }
 
     def start_streaming(self) -> dict:
         return {"columns": {}}
@@ -26,7 +29,17 @@ class ColumnProfiler:
             column_state = state["columns"].get(column)
             if column_state is None:
                 is_numeric = pd.api.types.is_numeric_dtype(series)
-                column_state = {"dtype": str(series.dtype), "is_numeric": is_numeric, "rows": 0, "null_count": 0, "memory_usage": 0, "unique_values": set(), "unique_overflow": False, "sample": [], "statistics": self.statistics.start_streaming(is_numeric)}
+                column_state = {
+                    "dtype": str(series.dtype),
+                    "is_numeric": is_numeric,
+                    "rows": 0,
+                    "null_count": 0,
+                    "memory_usage": 0,
+                    "unique_values": set(),
+                    "unique_overflow": False,
+                    "sample": [],
+                    "statistics": self.statistics.start_streaming(is_numeric),
+                }
                 state["columns"][column] = column_state
 
             column_state["rows"] += len(series)
@@ -38,7 +51,7 @@ class ColumnProfiler:
                 for value in values:
                     try:
                         column_state["unique_values"].add(value)
-                    except TypeError:
+                    except (TypeError, ValueError):
                         continue
                     if len(column_state["unique_values"]) > self.MAX_UNIQUE_VALUES:
                         column_state["unique_values"].clear()
@@ -55,19 +68,33 @@ class ColumnProfiler:
         columns = {}
         for column, column_state in state["columns"].items():
             rows = column_state["rows"]
+            non_null = rows - column_state["null_count"]
             exact = not column_state["unique_overflow"]
             unique_count = len(column_state["unique_values"]) if exact else self.MAX_UNIQUE_VALUES + 1
             sample = pd.Series(column_state["sample"], dtype=column_state["dtype"])
+            semantic_type = self.datatype.infer_streaming(
+                column,
+                column_state["dtype"],
+                sample,
+                non_null,
+                unique_count,
+            )
+            validation_type = self.datatype.validation_type(column_state["dtype"], semantic_type)
             columns[column] = {
                 "name": column,
                 "pandas_dtype": column_state["dtype"],
-                "semantic_type": self.datatype.infer_streaming(column, column_state["dtype"], sample, rows - column_state["null_count"], unique_count),
+                "semantic_type": semantic_type,
+                "validation_type": validation_type,
                 "memory_usage": int(column_state["memory_usage"]),
                 "unique_values": int(unique_count),
                 "unique_values_exact": exact,
+                "cardinality_ratio": round(unique_count / max(non_null, 1), 6),
                 "null_count": int(column_state["null_count"]),
                 "null_percentage": round(column_state["null_count"] / max(rows, 1) * 100, 2),
-                "statistics": self.statistics.finalize_streaming(column_state["statistics"], rows),
+                "all_null": bool(rows > 0 and column_state["null_count"] == rows),
+                "statistics": self.statistics.finalize_streaming(
+                    column_state["statistics"], rows
+                ),
             }
         return columns
 
@@ -78,4 +105,21 @@ class ColumnProfiler:
         return self.finalize_streaming(state)
 
     def profile_column(self, column_name: str, series: pd.Series) -> dict:
-        return {"name": column_name, "pandas_dtype": str(series.dtype), "semantic_type": self.datatype.infer(column_name, series), "memory_usage": int(series.memory_usage(deep=True)), "unique_values": int(series.nunique(dropna=True)), "unique_values_exact": True, "null_count": int(series.isna().sum()), "null_percentage": round(float(series.isna().mean() * 100), 2), "statistics": self.statistics.profile(series)}
+        semantic_type = self.datatype.infer(column_name, series)
+        validation_type = self.datatype.validation_type(str(series.dtype), semantic_type)
+        non_null = int(series.notna().sum())
+        unique = int(series.nunique(dropna=True))
+        return {
+            "name": column_name,
+            "pandas_dtype": str(series.dtype),
+            "semantic_type": semantic_type,
+            "validation_type": validation_type,
+            "memory_usage": int(series.memory_usage(deep=True)),
+            "unique_values": unique,
+            "unique_values_exact": True,
+            "cardinality_ratio": round(unique / max(non_null, 1), 6),
+            "null_count": int(series.isna().sum()),
+            "null_percentage": round(float(series.isna().mean() * 100), 2),
+            "all_null": bool(len(series) > 0 and series.isna().all()),
+            "statistics": self.statistics.profile(series),
+        }
