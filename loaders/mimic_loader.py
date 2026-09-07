@@ -10,29 +10,7 @@ from loaders.readers.csv_reader import CsvReader
 
 
 class MimicLoader(BaseLoader):
-    """
-    Loader for MIMIC-IV datasets.
-
-    Supports:
-
-        mimic/
-            hosp/
-            icu/
-
-    including:
-
-        *.csv
-        *.csv.gz
-
-    DataFrames are loaded lazily.
-
-    Point dataset_path directly at the version folder (e.g.
-    data/raw/mimiciv/3.1), not its parent. Discovery is recursive so it
-    finds files either way, but table names are built from every
-    directory between dataset_path and the file - pointing at the
-    parent produces names like "3.1_hosp_admissions" instead of the
-    clean "hosp_admissions".
-    """
+    """Loader for MIMIC-IV datasets."""
 
     def __init__(
         self,
@@ -42,110 +20,54 @@ class MimicLoader(BaseLoader):
         readers,
         catalog: DatasetCatalog,
     ):
-        super().__init__(
-            manifest,
-            validator,
-            discovery,
-            readers,
-            catalog,
-        )
-
+        super().__init__(manifest, validator, discovery, readers, catalog)
         self.reader: CsvReader = readers["csv"]
 
-    ##################################################################
-
     def load(self):
+        # DatasetValidator validates the manifest only. Discovery is passed
+        # separately to the loader and is used below to enumerate files.
+        self.validator.validate(self.manifest)
 
-        self.validator.validate(self.manifest, self.discovery)
-
-        files = self.discovery.discover(
-            self.manifest.root_path
-        )
+        files = self.discovery.discover(self.manifest.root_path)
 
         for file in files:
-
             if not self.reader.supports(file):
                 continue
 
             table_name = self._table_name(
                 file.relative_to(self.manifest.root_path)
             )
-
-            self.catalog.register_table(
-                table_name,
-                file,
-            )
-
-    ##################################################################
+            self.catalog.register_table(table_name, file)
 
     def get_tables(self):
-
         return self.catalog.get_tables()
 
-    ##################################################################
-
-    def get_dataframe(
-        self,
-        table_name: str,
-    ) -> pd.DataFrame:
-
+    def get_dataframe(self, table_name: str) -> pd.DataFrame:
         table_name = table_name.lower()
 
-        cached = self.catalog.get_cached_dataframe(
-            table_name
-        )
-
+        cached = self.catalog.get_cached_dataframe(table_name)
         if cached is not None:
             return cached
 
-        file_path = self.catalog.get_table_path(
-            table_name
-        )
-
+        file_path = self.catalog.get_table_path(table_name)
         dataframe = self.reader.read(file_path)
-
-        self.catalog.cache_dataframe(
-            table_name,
-            dataframe,
-        )
-
+        self.catalog.cache_dataframe(table_name, dataframe)
         return dataframe
 
-    ##################################################################
-
-    def get_dataframe_chunks(
-        self,
-        table_name: str,
-        chunksize: int = 100000,
-    ):
-        """Yield uncached DataFrame chunks for a MIMIC table.
-
-        This deliberately bypasses the DataFrame cache: requesting streamed
-        data must not change the existing lazy-loading behaviour of
-        :meth:`get_dataframe`.
-        """
-
+    def get_dataframe_chunks(self, table_name: str, chunksize: int = 100000):
+        """Yield uncached DataFrame chunks for a MIMIC table."""
         file_path = self.catalog.get_table_path(table_name.lower())
         return self.reader.read_chunks(file_path, chunksize=chunksize)
 
-    ##################################################################
-
     def get_schema(self):
-
         schema = {}
 
         for table in self.get_tables():
-
             dataframe = self.get_dataframe(table)
-
             schema[table] = {
-
                 "rows": len(dataframe),
-
                 "columns": list(dataframe.columns),
-
                 "shape": dataframe.shape,
-
                 "dtypes": {
                     column: str(dtype)
                     for column, dtype in dataframe.dtypes.items()
@@ -154,36 +76,16 @@ class MimicLoader(BaseLoader):
 
         return schema
 
-    ##################################################################
-
     @staticmethod
     def _table_name(file: Path) -> str:
-        """
-        Convert paths such as
-
-            hosp/patients.csv
-            icu/chartevents.csv.gz
-
-        into
-
-            hosp_patients
-            icu_chartevents
-
-        Including the relative directory prevents collisions between
-        identically named files in different MIMIC-IV directories.
-        """
-
         name = file.name.lower()
 
         if name.endswith(".csv.gz"):
             table_name = name[:-7]
-
         elif name.endswith(".csv"):
             table_name = name[:-4]
-
         else:
             table_name = file.stem.lower()
 
         directories = [part.lower() for part in file.parts[:-1]]
-
         return "_".join([*directories, table_name])
