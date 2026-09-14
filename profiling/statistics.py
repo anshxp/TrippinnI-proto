@@ -29,7 +29,7 @@ class StatisticsProfiler:
             "frequency_overflow": False,
             "reservoir": [],
             "seen_for_reservoir": 0,
-            "random": random.Random(42),
+            "random": np.random.default_rng(42),
         }
 
     def update_streaming(self, state: dict, series: pd.Series) -> None:
@@ -41,7 +41,6 @@ class StatisticsProfiler:
             if n == 0:
                 return
 
-            # Merge chunk-level moments instead of iterating over every cell.
             chunk_mean = float(values.mean())
             chunk_m2 = float(((values - chunk_mean) ** 2).sum())
             old_count = state["count"]
@@ -55,10 +54,10 @@ class StatisticsProfiler:
                 state["mean"] += delta * n / new_count
             state["count"] = new_count
 
-            chunk_min = values.min()
-            chunk_max = values.max()
-            state["minimum"] = float(chunk_min) if state["minimum"] is None else min(state["minimum"], float(chunk_min))
-            state["maximum"] = float(chunk_max) if state["maximum"] is None else max(state["maximum"], float(chunk_max))
+            chunk_min = float(values.min())
+            chunk_max = float(values.max())
+            state["minimum"] = chunk_min if state["minimum"] is None else min(state["minimum"], chunk_min)
+            state["maximum"] = chunk_max if state["maximum"] is None else max(state["maximum"], chunk_max)
 
             self._update_frequency_from_counts(state, values.value_counts(dropna=True))
             self._update_reservoir_from_sample(state, values)
@@ -85,35 +84,46 @@ class StatisticsProfiler:
                 break
 
     def _update_reservoir_from_sample(self, state: dict, values: pd.Series) -> None:
-        """Update the bounded quantile sample without a Python loop over cells."""
+        """Update the bounded quantile sample using a pandas-compatible RNG."""
         n = len(values)
-        state["seen_for_reservoir"] += n
-        sample_size = min(self.RESERVOIR_SIZE, n)
-        sample = values.sample(sample_size, random_state=state["random"]).tolist()
-
-        reservoir = state["reservoir"]
-        if len(reservoir) < self.RESERVOIR_SIZE:
-            reservoir.extend(sample[: self.RESERVOIR_SIZE - len(reservoir)])
-
-        remaining = sample if len(reservoir) >= self.RESERVOIR_SIZE else sample[len(reservoir):]
-        if not remaining:
+        if n == 0:
             return
 
-        # For full reservoirs, replace a bounded random subset. This is an
-        # approximation of cell-level reservoir sampling but avoids millions
-        # of Python-level random operations on large EHR tables.
-        replace_count = min(len(remaining), self.RESERVOIR_SIZE)
-        positions = self._sample_positions(state["random"], replace_count)
-        for position, value in zip(positions, remaining):
-            reservoir[position] = value
+        rng = state["random"]
+        reservoir = state["reservoir"]
+        seen_before = state["seen_for_reservoir"]
 
-    @staticmethod
-    def _sample_positions(rng: random.Random, count: int) -> list[int]:
-        if count <= 0:
-            return []
-        if count >= StatisticsProfiler.RESERVOIR_SIZE:
-            return list(range(StatisticsProfiler.RESERVOIR_SIZE))
-        return rng.sample(range(StatisticsProfiler.RESERVOIR_SIZE), count)
+        if len(reservoir) < self.RESERVOIR_SIZE:
+            needed = self.RESERVOIR_SIZE - len(reservoir)
+            take = min(needed, n)
+            indices = rng.choice(n, size=take, replace=False)
+            reservoir.extend(values.iloc[indices].tolist())
+
+        state["seen_for_reservoir"] = seen_before + n
+        total_seen = state["seen_for_reservoir"]
+
+        if len(reservoir) < self.RESERVOIR_SIZE or n == 0:
+            return
+
+        # Approximate bounded replacement. This avoids one Python-level
+        # random decision for every incoming numeric cell.
+        replace_probability = self.RESERVOIR_SIZE / max(total_seen, 1)
+        replace_count = min(
+            self.RESERVOIR_SIZE,
+            int(round(n * replace_probability)),
+        )
+        if replace_count <= 0:
+            return
+
+        incoming_indices = rng.choice(n, size=replace_count, replace=False)
+        reservoir_indices = rng.choice(
+            self.RESERVOIR_SIZE,
+            size=replace_count,
+            replace=False,
+        )
+        incoming = values.iloc[incoming_indices].tolist()
+        for position, value in zip(reservoir_indices, incoming):
+            reservoir[int(position)] = value
 
     def finalize_streaming(self, state: dict, total_rows: int) -> dict:
         missing_percentage = round(state["missing"] / max(total_rows, 1) * 100, 2)
