@@ -5,6 +5,9 @@ Coordinates all TrippinnI modules.
 """
 
 import gc
+import gzip
+import time
+from pathlib import Path
 
 import psutil
 
@@ -61,8 +64,15 @@ class Orchestrator:
         self.quality_results = {}
 
         loader = self.loader_manager.get_loader()
+        tables = loader.get_tables()
+        total_tables = len(tables)
 
-        for table in loader.get_tables():
+        print()
+        print("=" * 78)
+        print(f"PROFILING STARTED | {total_tables} table(s)")
+        print("=" * 78)
+
+        for table_index, table in enumerate(tables, start=1):
 
             if hasattr(loader, "get_dataframe_chunks"):
                 # Both MimicLoader and SyntheaLoader expose this now.
@@ -71,31 +81,78 @@ class Orchestrator:
                 # in the same pass, so MissingDetector/DuplicateDetector/
                 # etc. (which expect a real in-memory DataFrame) still
                 # run, without ever materializing the full table.
+                source_path = self._get_source_path(loader, table)
+                total_rows = self._estimate_data_rows(source_path)
+                file_size_mb = source_path.stat().st_size / (1024 ** 2)
+
+                print()
+                print("-" * 78)
+                print(
+                    f"[{table_index}/{total_tables}] "
+                    f"PROFILING: {source_path.name}"
+                )
+                print(f"  Source: {source_path}")
+                print(f"  File size: {file_size_mb:,.1f} MB")
+                print(
+                    f"  Estimated data rows: {total_rows:,} "
+                    f"(based on CSV physical lines)"
+                )
+                print(f"  Chunk size: {config.CSV_CHUNK_SIZE:,} rows")
+                print("  Stage: reading + profiling + key detection")
+
                 chunks = loader.get_dataframe_chunks(
                     table,
                     chunksize=config.CSV_CHUNK_SIZE,
                 )
+                progress_chunks = self._progress_chunks(
+                    chunks,
+                    table=table,
+                    filename=source_path.name,
+                    total_rows=total_rows,
+                    table_index=table_index,
+                    total_tables=total_tables,
+                )
 
+                profile_started = time.monotonic()
                 report, sample = self.profiler.profile_chunks(
                     table,
-                    chunks,
+                    progress_chunks,
                     sample_size=config.MAX_ROWS_FOR_DETECTION,
                     sample_seed=config.DETECTION_SAMPLE_SEED,
                 )
+                profile_elapsed = time.monotonic() - profile_started
                 self.profiles[table] = report
 
+                print(
+                    f"  Stage complete: profiling | "
+                    f"elapsed {self._format_duration(profile_elapsed)}"
+                )
+
                 if sample is not None:
+                    print(
+                        f"  Stage: quality detection | "
+                        f"sample rows: {len(sample):,}"
+                    )
                     sample = downcast_dataframe(sample)
 
+                    detection_started = time.monotonic()
                     result = self.quality_detector.run(
                         {table: sample},
                         report,
                     )
                     result.issues = self.confidence.aggregate(result.issues)
                     self.quality_results[table] = result
+                    detection_elapsed = time.monotonic() - detection_started
+
+                    print(
+                        f"  Stage complete: quality detection | "
+                        f"elapsed {self._format_duration(detection_elapsed)} | "
+                        f"issues: {result.total_issues}"
+                    )
 
                     release(sample)
 
+                print("  Stage: saving report + releasing table resources")
                 loader.clear_cache()
                 gc.collect()
                 self._log_memory(table)
@@ -105,12 +162,26 @@ class Orchestrator:
             # (e.g. a future JSON/FHIR loader). Full-load, then downcast
             # and subsample before detection, same as the chunked path
             # achieves via streaming.
+            print()
+            print("-" * 78)
+            print(
+                f"[{table_index}/{total_tables}] "
+                f"PROFILING: {table} (non-chunked loader)"
+            )
+            print("  Stage: loading full table into memory")
+            profile_started = time.monotonic()
             dataframe = loader.get_dataframe(table)
             dataframe = downcast_dataframe(dataframe)
 
             self.profiles[table] = self.profiler.profile(
                 table,
                 dataframe,
+            )
+            profile_elapsed = time.monotonic() - profile_started
+            print(
+                f"  Stage complete: profiling | "
+                f"rows: {len(dataframe):,} | "
+                f"elapsed {self._format_duration(profile_elapsed)}"
             )
 
             detection_frame = dataframe
@@ -120,6 +191,10 @@ class Orchestrator:
                     random_state=config.DETECTION_SAMPLE_SEED,
                 )
 
+            print(
+                f"  Stage: quality detection | "
+                f"sample rows: {len(detection_frame):,}"
+            )
             result = self.quality_detector.run(
                 {table: detection_frame},
                 self.profiles[table],
@@ -133,17 +208,116 @@ class Orchestrator:
             loader.clear_cache()
             self._log_memory(table)
 
+        print()
+        print("=" * 78)
         print("Dataset profiling and quality detection completed.")
+        print("=" * 78)
+
+    ##################################################################
+
+    @staticmethod
+    def _get_source_path(loader, table: str) -> Path:
+        """Return the actual source file for a catalog-backed table."""
+        catalog = getattr(loader, "catalog", None)
+        if catalog is None:
+            return Path(table)
+        return Path(catalog.get_table_path(table))
+
+    ##################################################################
+
+    @staticmethod
+    def _estimate_data_rows(source_path: Path) -> int:
+        """Estimate CSV data rows by counting physical lines.
+
+        MIMIC-IV CSV tables are line-oriented. The estimate is used only
+        for live progress/ETA display; it does not affect profiling logic.
+        """
+        opener = gzip.open if source_path.name.lower().endswith(".gz") else open
+        try:
+            with opener(source_path, "rb") as handle:
+                line_count = sum(1 for _ in handle)
+        except (OSError, EOFError):
+            return 0
+        return max(line_count - 1, 0)
+
+    ##################################################################
+
+    def _progress_chunks(
+        self,
+        chunks,
+        *,
+        table: str,
+        filename: str,
+        total_rows: int,
+        table_index: int,
+        total_tables: int,
+    ):
+        """Yield profiling chunks while printing live progress and ETA."""
+        started = time.monotonic()
+        rows_seen = 0
+        chunk_number = 0
+
+        for chunk in chunks:
+            chunk_number += 1
+            rows_seen += len(chunk)
+
+            elapsed = max(time.monotonic() - started, 1e-9)
+            rate = rows_seen / elapsed
+
+            if total_rows > 0:
+                percent = min(rows_seen / total_rows * 100.0, 100.0)
+                remaining = max(total_rows - rows_seen, 0)
+                eta_seconds = remaining / rate if rate > 0 else 0
+                progress = (
+                    f"{percent:6.2f}% | "
+                    f"{rows_seen:,}/{total_rows:,} rows | "
+                    f"~{remaining:,} left | "
+                    f"ETA {self._format_duration(eta_seconds)}"
+                )
+            else:
+                progress = (
+                    f"{rows_seen:,} rows | "
+                    f"ETA unavailable"
+                )
+
+            print(
+                f"  [{table_index}/{total_tables}] "
+                f"{filename} | chunk {chunk_number} | "
+                f"{progress} | "
+                f"{rate:,.0f} rows/s | "
+                f"elapsed {self._format_duration(elapsed)}"
+            )
+            yield chunk
+
+        elapsed = time.monotonic() - started
+        print(
+            f"  [{table_index}/{total_tables}] {filename} | "
+            f"READ COMPLETE | {rows_seen:,} rows | "
+            f"{chunk_number} chunks | "
+            f"elapsed {self._format_duration(elapsed)}"
+        )
+
+    ##################################################################
+
+    @staticmethod
+    def _format_duration(seconds: float) -> str:
+        seconds = max(float(seconds), 0.0)
+        if seconds < 60:
+            return f"{seconds:.1f}s"
+        minutes, remaining = divmod(int(seconds), 60)
+        if minutes < 60:
+            return f"{minutes}m {remaining:02d}s"
+        hours, minutes = divmod(minutes, 60)
+        return f"{hours}h {minutes:02d}m"
 
     ##################################################################
 
     def _log_memory(self, table: str) -> None:
         """
         Print current process RSS after a table finishes. This is the
-        thing to actually watch during a real run on your 10GB dataset:
-        if this number climbs steadily table over table instead of
-        staying roughly flat, something is holding a reference it
-        shouldn't (check for accidental caching first).
+        thing to actually watch during a real 10GB run: if this number
+        climbs steadily table over table instead of staying roughly flat,
+        something is holding a reference it shouldn't.
         """
 
         rss_mb = self._process.memory_info().rss / (1024 ** 2)
