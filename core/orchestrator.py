@@ -93,10 +93,13 @@ class Orchestrator:
                 )
                 print(f"  Source: {source_path}")
                 print(f"  File size: {file_size_mb:,.1f} MB")
-                print(
-                    f"  Estimated data rows: {total_rows:,} "
-                    f"(based on CSV physical lines)"
-                )
+                if total_rows > 0:
+                    print(
+                        f"  Estimated data rows: {total_rows:,} "
+                        f"(based on CSV physical lines)"
+                    )
+                else:
+                    print("  Estimated data rows: unavailable (streaming count)")
                 print(f"  Chunk size: {config.CSV_CHUNK_SIZE:,} rows")
                 print("  Stage: reading + profiling + key detection")
 
@@ -227,14 +230,19 @@ class Orchestrator:
 
     @staticmethod
     def _estimate_data_rows(source_path: Path) -> int:
-        """Estimate CSV data rows by counting physical lines.
+        """Return a row estimate without pre-scanning compressed CSV files.
 
-        MIMIC-IV CSV tables are line-oriented. The estimate is used only
-        for live progress/ETA display; it does not affect profiling logic.
+        A full gzip line-count scan decompresses the entire file before the
+        actual streaming profiler starts. That duplicates I/O and can expose
+        large MIMIC-IV files to an unnecessary second decompression pass.
+        For compressed CSVs, the streaming profiler is the authoritative row
+        counter, so return 0 and let live progress report rows processed.
         """
-        opener = gzip.open if source_path.name.lower().endswith(".gz") else open
+        if source_path.name.lower().endswith(".gz"):
+            return 0
+
         try:
-            with opener(source_path, "rb") as handle:
+            with open(source_path, "rb") as handle:
                 line_count = sum(1 for _ in handle)
         except (OSError, EOFError):
             return 0
