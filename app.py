@@ -1,9 +1,5 @@
-from pathlib import Path
-
 from core.pipeline import Pipeline
-
-
-DATA_ROOT = Path("data/raw")
+from config import DATA_ROOT
 
 
 def resolve_mimic_root() -> Path:
