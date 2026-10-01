@@ -1,12 +1,14 @@
 import json
 from pathlib import Path
 
+import config
+
 
 class ReportWriter:
 
     def __init__(self):
 
-        self.output = Path("outputs/reports/profiling")
+        self.output = config.OUTPUT_ROOT / "reports" / "profiling"
 
         self.output.mkdir(
             parents=True,
