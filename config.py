@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import os
+from pathlib import Path
+
 # LLM configuration
 LLM_MODEL = "Qwen/Qwen3-4B-Instruct"
 MAX_NEW_TOKENS = 512
@@ -18,3 +21,9 @@ PROFILE_SAMPLE_SEED = 42
 # Quality detectors still receive a bounded in-memory sample.
 MAX_ROWS_FOR_DETECTION = 10_000
 DETECTION_SAMPLE_SEED = 42
+
+# Local NVMe workspace (F:) for the prototype.
+# Override with environment variables if the dataset/workspace lives elsewhere.
+DATA_ROOT = Path(os.getenv("TRIPPINNI_DATA_ROOT", "F:/TrippinnI-data/raw"))
+WORK_ROOT = Path(os.getenv("TRIPPINNI_WORK_ROOT", "F:/TrippinnI-work"))
+OUTPUT_ROOT = WORK_ROOT / "outputs"
