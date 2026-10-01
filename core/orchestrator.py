@@ -116,11 +116,14 @@ class Orchestrator:
                 else:
                     print("  Estimated data rows: unavailable (streaming count)")
                 print(f"  Chunk size: {config.CSV_CHUNK_SIZE:,} rows")
-                print("  Stage: reading + profiling + key detection")
+                print(f"  Prototype sample fraction: {config.PROFILE_SAMPLE_FRACTION:.0%}")
+                print("  Stage: streaming sampled rows + profiling + key detection")
 
                 chunks = loader.get_dataframe_chunks(
                     table,
                     chunksize=config.CSV_CHUNK_SIZE,
+                    sample_fraction=config.PROFILE_SAMPLE_FRACTION,
+                    sample_seed=config.PROFILE_SAMPLE_SEED,
                 )
                 progress_chunks = self._progress_chunks(
                     chunks,
