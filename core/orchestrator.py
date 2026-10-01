@@ -6,6 +6,7 @@ Coordinates all TrippinnI modules.
 
 import gc
 import gzip
+import json
 import time
 from pathlib import Path
 
@@ -32,6 +33,11 @@ class Orchestrator:
 
         self.profiles = {}
         self.quality_results = {}
+
+        # Persistent table-level checkpoint. A table is marked complete only
+        # after profiling AND quality detection finish successfully.
+        self.checkpoint_path = Path("outputs/reports/profiling/.checkpoint.json")
+        self.checkpoint_path.parent.mkdir(parents=True, exist_ok=True)
 
         # For visibility while running on constrained hardware - see
         # _log_memory below. Not used for any decision-making, purely
@@ -66,6 +72,11 @@ class Orchestrator:
         loader = self.loader_manager.get_loader()
         tables = loader.get_tables()
         total_tables = len(tables)
+        completed_tables = self._load_checkpoint()
+
+        if completed_tables:
+            print()
+            print(f"RESUME: skipping {len(completed_tables):,} completed table(s)")
 
         print()
         print("=" * 78)
@@ -73,6 +84,10 @@ class Orchestrator:
         print("=" * 78)
 
         for table_index, table in enumerate(tables, start=1):
+
+            if table in completed_tables:
+                print(f"[{table_index}/{total_tables}] SKIP: {table} (already completed)")
+                continue
 
             if hasattr(loader, "get_dataframe_chunks"):
                 # Both MimicLoader and SyntheaLoader expose this now.
@@ -159,6 +174,9 @@ class Orchestrator:
                 loader.clear_cache()
                 gc.collect()
                 self._log_memory(table)
+                self._mark_table_complete(table)
+                completed_tables.add(table)
+                print(f"  Checkpoint saved: {table}")
                 continue
 
             # Fallback for any loader without chunked reading support
@@ -210,11 +228,44 @@ class Orchestrator:
             release(dataframe, detection_frame)
             loader.clear_cache()
             self._log_memory(table)
+            self._mark_table_complete(table)
+            completed_tables.add(table)
+            print(f"  Checkpoint saved: {table}")
 
         print()
         print("=" * 78)
         print("Dataset profiling and quality detection completed.")
         print("=" * 78)
+
+    ##################################################################
+
+    def _load_checkpoint(self) -> set[str]:
+        """Load table names that completed the full pipeline previously."""
+        if not self.checkpoint_path.exists():
+            return set()
+        try:
+            with self.checkpoint_path.open("r", encoding="utf-8") as handle:
+                data = json.load(handle)
+            return set(data.get("completed_tables", []))
+        except (OSError, ValueError, TypeError):
+            print("  Warning: checkpoint could not be read; starting without resume state.")
+            return set()
+
+    def _mark_table_complete(self, table: str) -> None:
+        """Persist completion immediately after a table finishes successfully."""
+        completed = self._load_checkpoint()
+        completed.add(table)
+        payload = {
+            "version": 1,
+            "completed_tables": sorted(completed),
+        }
+        temporary = self.checkpoint_path.with_suffix(".tmp")
+        try:
+            with temporary.open("w", encoding="utf-8") as handle:
+                json.dump(payload, handle, indent=2)
+            temporary.replace(self.checkpoint_path)
+        except OSError as exc:
+            print(f"  Warning: could not save checkpoint: {exc}")
 
     ##################################################################
 
