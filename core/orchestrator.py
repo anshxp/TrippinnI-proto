@@ -36,7 +36,7 @@ class Orchestrator:
 
         # Persistent table-level checkpoint. A table is marked complete only
         # after profiling AND quality detection finish successfully.
-        self.checkpoint_path = Path("outputs/reports/profiling/.checkpoint.json")
+        self.checkpoint_path = config.OUTPUT_ROOT / "reports" / "profiling" / ".checkpoint.json"
         self.checkpoint_path.parent.mkdir(parents=True, exist_ok=True)
 
         # For visibility while running on constrained hardware - see
