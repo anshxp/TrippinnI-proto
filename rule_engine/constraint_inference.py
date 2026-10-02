@@ -44,7 +44,7 @@ class ConstraintInferer:
     """Infer structural and data-driven constraints without table-specific rules."""
 
     _START_TOKENS = {"start", "begin", "from", "in", "admit", "admission", "register", "reg", "birth", "onset"}
-    _END_TOKENS = {"end", "stop", "to", "out", "discharge", "death", "expire", "finish"}
+    _END_TOKENS = {"end", "stop", "to", "out", "discharge", "disch", "death", "expire", "finish"}
     _TIME_TOKENS = {"time", "date", "datetime", "timestamp"}
     _BINARY_TOKENS = {"flag", "indicator", "boolean", "bool", "status"}
 
