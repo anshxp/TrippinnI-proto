@@ -6,7 +6,7 @@ from __future__ import annotations
 
 MIMIC_REQUIRED_FIELDS = {
     "hosp_admissions": ("subject_id", "hadm_id", "admittime", "dischtime"),
-    "hosp_transfers": ("subject_id", "hadm_id", "transfer_id"),
+    "hosp_transfers": ("subject_id", "transfer_id"),
     "hosp_labevents": ("labevent_id", "subject_id", "itemid"),
     "hosp_microbiologyevents": ("microevent_id", "subject_id"),
     "icu_icustays": ("subject_id", "hadm_id", "stay_id", "intime", "outtime"),
