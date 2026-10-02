@@ -5,6 +5,10 @@ Healthcare validation configuration used by the Module 2 rule validator.
 from __future__ import annotations
 
 MIMIC_REQUIRED_FIELDS = {
+    "hosp_patients": ("subject_id",),
+    "icu_caregiver": ("caregiver_id",),
+    "icu_d_items": ("itemid",),
+    "hosp_d_labitems": ("itemid",),
     "hosp_admissions": ("subject_id", "hadm_id", "admittime", "dischtime"),
     "hosp_transfers": ("subject_id", "transfer_id"),
     "hosp_labevents": ("labevent_id", "subject_id", "itemid"),
