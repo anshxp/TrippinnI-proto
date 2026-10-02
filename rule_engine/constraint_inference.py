@@ -1,8 +1,12 @@
-"""Automatic constraint inference for healthcare tables.
+"""Machine-learning-assisted constraint discovery for healthcare tables.
 
-The engine derives validation rules from the observed schema, semantic types,
-cardinality, functional dependencies, and value distributions. It does not
-contain a table-name or column-name allowlist of clinical ranges.
+Constraints are learned from the observed data rather than from a MIMIC-specific
+column allowlist. The learner is deliberately conservative: unsupervised models
+discover empirical structure/plausibility, while structural schema facts remain
+separate.
+
+The learned constraints are *dataset-derived* and must not be interpreted as
+clinical reference ranges unless an external clinical knowledge source is added.
 """
 
 from __future__ import annotations
@@ -13,6 +17,7 @@ from typing import Any
 
 import numpy as np
 import pandas as pd
+from sklearn.ensemble import IsolationForest
 
 
 @dataclass(frozen=True)
@@ -21,6 +26,7 @@ class TemporalConstraint:
     end: str
     confidence: float
     evidence: str
+    model: str = "IsolationForest"
 
 
 @dataclass(frozen=True)
@@ -29,6 +35,7 @@ class HierarchyConstraint:
     parent: str
     confidence: float
     evidence: str
+    model: str = "IsolationForest"
 
 
 @dataclass(frozen=True)
@@ -38,17 +45,23 @@ class NumericConstraint:
     upper: float | None
     confidence: float
     evidence: str
+    model: str = "IsolationForest"
 
 
 class ConstraintInferer:
-    """Infer structural and data-driven constraints without table-specific rules."""
+    """Discover empirical constraints with unsupervised machine learning."""
 
-    _START_TOKENS = {"start", "begin", "from", "in", "admit", "admission", "register", "reg", "birth", "onset"}
-    _END_TOKENS = {"end", "stop", "to", "out", "discharge", "disch", "death", "expire", "finish"}
-    _TIME_TOKENS = {"time", "date", "datetime", "timestamp"}
-    _BINARY_TOKENS = {"flag", "indicator", "boolean", "bool", "status"}
+    RANDOM_STATE = 42
+    MIN_RELATION_ROWS = 20
+    MIN_NUMERIC_ROWS = 30
+    MIN_UNIQUE_NUMERIC = 3
+    MIN_TEMPORAL_VARIATION = 1e-9
 
-    def infer(self, dataframe: pd.DataFrame, profile: dict[str, Any] | None = None) -> dict[str, list[dict[str, Any]]]:
+    def infer(
+        self,
+        dataframe: pd.DataFrame,
+        profile: dict[str, Any] | None = None,
+    ) -> dict[str, list[dict[str, Any]]]:
         profile = profile or {}
         return {
             "temporal": [asdict(x) for x in self.infer_temporal(dataframe, profile)],
@@ -57,121 +70,287 @@ class ConstraintInferer:
             "binary": [asdict(x) for x in self.infer_binary(dataframe, profile)],
         }
 
-    def infer_temporal(self, df: pd.DataFrame, profile: dict[str, Any]) -> list[TemporalConstraint]:
-        datetime_columns = []
-        column_profiles = profile.get("columns", {})
-        for column in df.columns:
-            meta = column_profiles.get(column, {})
-            if meta.get("semantic_type") == "datetime" or meta.get("validation_type") == "datetime":
-                datetime_columns.append(column)
-        constraints = []
+    def infer_temporal(
+        self,
+        df: pd.DataFrame,
+        profile: dict[str, Any],
+    ) -> list[TemporalConstraint]:
+        """Learn temporal ordering from timestamp-pair distributions.
+
+        No start/end vocabulary is required. For each timestamp pair we model
+        the observed signed time difference with IsolationForest. A candidate
+        ordering is emitted only when the model regards a highly dominant side
+        of zero as the normal population and there is enough variation to make
+        the direction identifiable.
+        """
+        datetime_columns = self._datetime_columns(df, profile)
+        constraints: list[TemporalConstraint] = []
+
         for left, right in combinations(datetime_columns, 2):
-            left_score = self._temporal_role_score(left, "start")
-            right_score = self._temporal_role_score(right, "end")
-            reverse_left = self._temporal_role_score(left, "end")
-            reverse_right = self._temporal_role_score(right, "start")
-            if left_score > 0 and right_score > 0 and self._same_temporal_context(left, right):
-                confidence = min(0.99, 0.55 + 0.08 * left_score + 0.08 * right_score)
-                constraints.append(TemporalConstraint(left, right, confidence, "semantic-name role inference"))
-            elif reverse_left > 0 and reverse_right > 0 and self._same_temporal_context(left, right):
-                confidence = min(0.99, 0.55 + 0.08 * reverse_left + 0.08 * reverse_right)
-                constraints.append(TemporalConstraint(right, left, confidence, "semantic-name role inference"))
+            pair = pd.DataFrame({
+                "left": pd.to_datetime(df[left], errors="coerce", format="mixed"),
+                "right": pd.to_datetime(df[right], errors="coerce", format="mixed"),
+            }).dropna()
+
+            if len(pair) < self.MIN_RELATION_ROWS:
+                continue
+
+            delta = (
+                pair["right"].astype("int64") - pair["left"].astype("int64")
+            ).to_numpy(dtype=np.float64) / 1e9
+
+            if not np.isfinite(delta).all() or np.ptp(delta) <= self.MIN_TEMPORAL_VARIATION:
+                continue
+
+            # Two features prevent the model from treating a large duration
+            # and a small duration as equivalent just because both have the
+            # same sign.
+            X = np.column_stack([delta, np.abs(delta)])
+            model = self._isolation_forest(len(delta))
+            model.fit(X)
+            inlier = model.predict(X) == 1
+            if inlier.sum() < max(10, int(0.5 * len(delta))):
+                continue
+
+            normal_delta = delta[inlier]
+            positive_rate = float(np.mean(normal_delta >= 0))
+            negative_rate = float(np.mean(normal_delta <= 0))
+
+            if positive_rate >= 0.98:
+                direction = (left, right)
+                dominance = positive_rate
+            elif negative_rate >= 0.98:
+                direction = (right, left)
+                dominance = negative_rate
+            else:
+                continue
+
+            inlier_fraction = float(np.mean(inlier))
+            confidence = min(
+                0.995,
+                0.50 + 0.30 * dominance + 0.20 * inlier_fraction,
+            )
+            constraints.append(TemporalConstraint(
+                start=direction[0],
+                end=direction[1],
+                confidence=confidence,
+                evidence=(
+                    "unsupervised temporal-order learning: "
+                    f"{inlier_fraction:.3f} inlier support, "
+                    f"{dominance:.3f} directional dominance"
+                ),
+            ))
+
         return self._dedupe_temporal(constraints)
 
-    def infer_hierarchy(self, df: pd.DataFrame, profile: dict[str, Any]) -> list[HierarchyConstraint]:
+    def infer_hierarchy(
+        self,
+        df: pd.DataFrame,
+        profile: dict[str, Any],
+    ) -> list[HierarchyConstraint]:
+        """Learn identifier dependencies using an ML anomaly model.
+
+        For each candidate identifier pair, the model learns the normal
+        structure of (child frequency, parent frequency, pair frequency,
+        parents-per-child). A candidate is retained only when the learned
+        normal population is also functionally dependent: one child maps to
+        one parent. This avoids encoding MIMIC identifiers such as
+        stay_id -> hadm_id -> subject_id directly in code.
+        """
         column_profiles = profile.get("columns", {})
         identifiers = [
             c for c in df.columns
             if column_profiles.get(c, {}).get("semantic_type") == "identifier"
         ]
-        constraints = []
+
+        constraints: list[HierarchyConstraint] = []
+
         for child, parent in combinations(identifiers, 2):
-            a = df[[child, parent]].dropna()
-            if len(a) < 10:
+            pair = df[[child, parent]].dropna()
+            if len(pair) < self.MIN_RELATION_ROWS:
                 continue
-            child_unique = a[child].nunique(dropna=True)
-            parent_unique = a[parent].nunique(dropna=True)
+
+            child_counts = pair[child].value_counts(dropna=False)
+            parent_counts = pair[parent].value_counts(dropna=False)
+            pair_counts = pair.groupby([child, parent], dropna=False).size()
+
+            parents_per_child = pair.groupby(child, dropna=False)[parent].nunique()
+            if parents_per_child.empty:
+                continue
+
+            # The child must have at least as many distinct values as its
+            # proposed parent. Otherwise the direction is not hierarchical.
+            child_unique = int(child_counts.size)
+            parent_unique = int(parent_counts.size)
             if child_unique <= parent_unique:
                 continue
-            grouped = a.groupby(child, dropna=True)[parent].nunique(dropna=True)
-            if grouped.empty or grouped.max() > 1:
+
+            features = []
+            for (child_value, parent_value), pair_count in pair_counts.items():
+                features.append([
+                    float(child_counts.loc[child_value]),
+                    float(parent_counts.loc[parent_value]),
+                    float(pair_count),
+                    float(parents_per_child.loc[child_value]),
+                ])
+
+            X = np.asarray(features, dtype=np.float64)
+            if len(X) < self.MIN_RELATION_ROWS:
                 continue
-            dependency = float((grouped == 1).mean())
+
+            model = self._isolation_forest(len(X))
+            model.fit(X)
+            inlier = model.predict(X) == 1
+            if inlier.mean() < 0.80:
+                continue
+
+            functional_dependency = float((parents_per_child == 1).mean())
+            if functional_dependency < 0.995:
+                continue
+
             cardinality_ratio = child_unique / max(parent_unique, 1)
-            confidence = min(0.99, 0.55 + 0.35 * dependency + 0.05 * min(np.log1p(cardinality_ratio), 2.0))
-            constraints.append(HierarchyConstraint(child, parent, confidence, "functional-dependency and cardinality inference"))
+            confidence = min(
+                0.995,
+                0.50
+                + 0.25 * functional_dependency
+                + 0.15 * float(inlier.mean())
+                + 0.10 * min(np.log1p(cardinality_ratio) / 3.0, 1.0),
+            )
+            constraints.append(HierarchyConstraint(
+                child=child,
+                parent=parent,
+                confidence=confidence,
+                evidence=(
+                    "unsupervised relational-pattern learning: "
+                    f"{functional_dependency:.3f} functional dependency, "
+                    f"{float(inlier.mean()):.3f} ML inlier support"
+                ),
+            ))
+
         return constraints
 
-    def infer_binary(self, df: pd.DataFrame, profile: dict[str, Any]) -> list[NumericConstraint]:
-        """Infer binary-domain constraints from semantic type and observed support."""
+    def infer_binary(
+        self,
+        df: pd.DataFrame,
+        profile: dict[str, Any],
+    ) -> list[NumericConstraint]:
+        """Learn binary domains from observed support, not field names."""
         column_profiles = profile.get("columns", {})
-        constraints = []
+        constraints: list[NumericConstraint] = []
+
         for column in df.columns:
             meta = column_profiles.get(column, {})
-            values = pd.to_numeric(df[column], errors="coerce").dropna()
+            values = (
+                pd.to_numeric(df[column], errors="coerce")
+                .replace([np.inf, -np.inf], np.nan)
+                .dropna()
+            )
             if values.empty or values.nunique() > 2:
                 continue
-            name_tokens = set(column.lower().replace("-", "_").split("_"))
-            semantic = meta.get("semantic_type")
-            if semantic == "boolean" or name_tokens & self._BINARY_TOKENS:
-                observed = sorted(values.unique().tolist())
-                if all(float(v).is_integer() for v in observed):
-                    lower = min(observed)
-                    upper = max(observed)
-                    if lower == 0 and upper == 1:
-                        constraints.append(NumericConstraint(
-                            column, 0.0, 1.0, 0.95,
-                            "binary semantic type/flag inference"
-                        ))
+
+            observed = sorted(values.unique().tolist())
+            if (
+                all(float(v).is_integer() for v in observed)
+                and observed == [0, 1]
+            ):
+                constraints.append(NumericConstraint(
+                    column=column,
+                    lower=0.0,
+                    upper=1.0,
+                    confidence=0.95,
+                    evidence="observed two-state integer domain",
+                    model="empirical-domain",
+                ))
+
         return constraints
-    def infer_numeric(self, df: pd.DataFrame, profile: dict[str, Any]) -> list[NumericConstraint]:
+
+    def infer_numeric(
+        self,
+        df: pd.DataFrame,
+        profile: dict[str, Any],
+    ) -> list[NumericConstraint]:
+        """Learn a normal numeric support region with IsolationForest."""
         column_profiles = profile.get("columns", {})
-        constraints = []
+        constraints: list[NumericConstraint] = []
+
         for column in df.columns:
             meta = column_profiles.get(column, {})
             if meta.get("semantic_type") != "numeric":
                 continue
-            values = pd.to_numeric(df[column], errors="coerce").replace([np.inf, -np.inf], np.nan).dropna()
-            if len(values) < 30 or values.nunique() < 3:
+
+            values = (
+                pd.to_numeric(df[column], errors="coerce")
+                .replace([np.inf, -np.inf], np.nan)
+                .dropna()
+            )
+            if len(values) < self.MIN_NUMERIC_ROWS:
                 continue
-            q1, q3 = values.quantile([0.25, 0.75])
-            iqr = float(q3 - q1)
-            if not np.isfinite(iqr) or iqr <= 0:
+            if values.nunique() < self.MIN_UNIQUE_NUMERIC:
                 continue
-            # Conservative empirical envelope. This is an inferred plausibility
-            # boundary, not a clinical reference range.
-            lower = float(q1 - 6.0 * iqr)
-            upper = float(q3 + 6.0 * iqr)
+
+            X = values.to_numpy(dtype=np.float64).reshape(-1, 1)
+            model = self._isolation_forest(len(X))
+            model.fit(X)
+            inlier = model.predict(X) == 1
+            inlier_values = values.iloc[np.flatnonzero(inlier)]
+
+            if len(inlier_values) < max(20, int(0.50 * len(values))):
+                continue
+
+            lower = float(inlier_values.min())
+            upper = float(inlier_values.max())
+            inlier_fraction = float(inlier.mean())
+
+            if not np.isfinite(lower) or not np.isfinite(upper) or lower == upper:
+                continue
+
+            # Confidence is explicitly a model/data confidence, not clinical
+            # truth. A clinical range requires a separate reference source.
+            confidence = min(0.90, 0.45 + 0.45 * inlier_fraction)
             constraints.append(NumericConstraint(
-                column, lower, upper, 0.60, "robust empirical distribution envelope"
+                column=column,
+                lower=lower,
+                upper=upper,
+                confidence=confidence,
+                evidence=(
+                    "IsolationForest learned empirical support region: "
+                    f"{inlier_fraction:.3f} inlier fraction"
+                ),
             ))
+
         return constraints
 
+    @staticmethod
+    def _datetime_columns(
+        df: pd.DataFrame,
+        profile: dict[str, Any],
+    ) -> list[str]:
+        columns = profile.get("columns", {})
+        output = []
+        for column in df.columns:
+            meta = columns.get(column, {})
+            if (
+                meta.get("semantic_type") == "datetime"
+                or meta.get("validation_type") == "datetime"
+                or pd.api.types.is_datetime64_any_dtype(df[column])
+            ):
+                output.append(column)
+        return output
+
     @classmethod
-    def _temporal_role_score(cls, name: str, role: str) -> int:
-        normalized = name.lower().replace("-", "_")
-        tokens = {token for token in normalized.split("_") if token}
-        tokens.discard("datetime")
-        tokens.discard("timestamp")
-        score = 0
-        if tokens & cls._TIME_TOKENS:
-            score += 1
-        target = cls._START_TOKENS if role == "start" else cls._END_TOKENS
-        score += 2 * len(tokens & target)
-        if any(token in normalized for token in target):
-            score += 2
-        return score
+    def _isolation_forest(cls, n_rows: int) -> IsolationForest:
+        return IsolationForest(
+            n_estimators=100,
+            contamination="auto",
+            max_samples=min(256, n_rows),
+            random_state=cls.RANDOM_STATE,
+            n_jobs=-1,
+        )
 
     @staticmethod
-    def _same_temporal_context(left: str, right: str) -> bool:
-        left_tokens = set(left.lower().replace("-", "_").split("_"))
-        right_tokens = set(right.lower().replace("-", "_").split("_"))
-        shared = left_tokens & right_tokens
-        shared -= {"time", "date", "datetime", "timestamp", "start", "stop", "end", "out", "in"}
-        return bool(shared) or len(left_tokens) <= 2 or len(right_tokens) <= 2
-
-    @staticmethod
-    def _dedupe_temporal(items: list[TemporalConstraint]) -> list[TemporalConstraint]:
+    def _dedupe_temporal(
+        items: list[TemporalConstraint],
+    ) -> list[TemporalConstraint]:
         seen = set()
         output = []
         for item in items:
