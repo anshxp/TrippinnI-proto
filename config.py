@@ -14,9 +14,10 @@ TEMPERATURE = 0.2
 CSV_CHUNK_SIZE = 100_000
 
 # Prototype profiling configuration
-# Stream only a fraction of each source table into the profiling pipeline.
-PROFILE_SAMPLE_FRACTION = 0.10
-PROFILE_SAMPLE_SEED = 42
+# Process only the deterministic first fraction of each source table.
+# This is a prefix, not a random sample: once the prefix boundary is
+# reached, the reader stops and the remaining source data is never parsed.
+PROFILE_PREFIX_FRACTION = 0.10
 
 # Quality detectors still receive a bounded in-memory sample.
 MAX_ROWS_FOR_DETECTION = 10_000
