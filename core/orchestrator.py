@@ -5,7 +5,6 @@ Coordinates all TrippinnI modules.
 """
 
 import gc
-import gzip
 import json
 import time
 from pathlib import Path
@@ -112,7 +111,7 @@ class Orchestrator:
                 if total_rows > 0:
                     print(
                         f"  Estimated data rows: {total_rows:,} "
-                        f"(based on CSV physical lines)"
+                        f"(MIMIC-IV v3.1 reference row count)"
                     )
                 else:
                     print("  Estimated data rows: unavailable (streaming count)")
@@ -297,8 +296,6 @@ class Orchestrator:
     def _get_mimic_row_count(table: str) -> int:
         """Return the known MIMIC-IV v3.1 row count for a table."""
         return int(config.MIMIC_V31_ROW_COUNTS.get(table.lower(), 0))
-
-    ##################################################################
 
     ##################################################################
 
