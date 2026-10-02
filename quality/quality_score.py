@@ -1,8 +1,4 @@
-"""
-Quality Score Calculator.
-
-Computes the overall dataset quality score.
-"""
+"""Dimension-aware quality scoring for the prototype."""
 
 from __future__ import annotations
 
@@ -13,88 +9,79 @@ from models.issue import Issue
 
 
 class QualityScore:
-    """
-    Computes an overall quality score for the dataset.
+    """Compute bounded, dimension-specific quality scores.
+
+    Issue counts are normalized against the appropriate denominator:
+    missing cells against cells, duplicates against rows, and value/rule
+    violations against rows. Penalties are capped so one noisy detector
+    cannot produce a negative or otherwise invalid score.
     """
 
-    def __init__(
-        self,
-        missing_weight: float = 0.20,
-        duplicate_weight: float = 0.20,
-        datatype_weight: float = 0.20,
-        outlier_weight: float = 0.40,
-    ):
+    WEIGHTS = {
+        "missing": 0.25,
+        "duplicate": 0.15,
+        "datatype": 0.20,
+        "outlier": 0.15,
+        "conformance": 0.10,
+        "temporal": 0.05,
+        "plausibility": 0.05,
+        "referential": 0.05,
+    }
 
-        self.weights = {
-            "missing": missing_weight,
-            "duplicate": duplicate_weight,
-            "datatype": datatype_weight,
-            "outlier": outlier_weight,
-        }
+    def __init__(self, **weights: float) -> None:
+        self.weights = dict(self.WEIGHTS)
+        for name, value in weights.items():
+            if name not in self.weights:
+                raise ValueError(f"Unknown quality dimension: {name}")
+            self.weights[name] = float(value)
+        total = sum(self.weights.values())
+        if total <= 0:
+            raise ValueError("Quality weights must sum to a positive value")
+        self.weights = {name: value / total for name, value in self.weights.items()}
 
     def calculate(
-        self,
-        issues: List[Issue],
-        total_records: int,
+        self, issues: List[Issue], total_records: int, total_cells: int | None = None
     ) -> dict:
-        """
-        Calculate the overall quality score.
-        """
-
-        issue_counts = Counter(
-            issue.issue_type.lower()
-            for issue in issues
-        )
-
-        scores = {}
-
-        for issue_type, weight in self.weights.items():
-
-            count = issue_counts.get(issue_type, 0)
-
-            if total_records == 0:
-                quality = 100.0
-            else:
-                quality = max(
-                    0.0,
-                    100 - ((count / total_records) * 100),
-                )
-
-            scores[issue_type] = {
-                "count": count,
-                "score": round(quality, 2),
-                "weight": weight,
-            }
-
-        overall_score = sum(
-            scores[name]["score"] * scores[name]["weight"]
-            for name in self.weights
-        )
-
-        return {
-            "overall_score": round(overall_score, 2),
-            "category_scores": scores,
-            "grade": self._grade(overall_score),
+        counts = Counter(issue.issue_type.lower() for issue in issues)
+        denominators = {
+            "missing": max(int(total_cells or total_records), 1),
+            "duplicate": max(int(total_records), 1),
+            "datatype": max(int(total_cells or total_records), 1),
+            "outlier": max(int(total_records), 1),
+            "conformance": max(int(total_records), 1),
+            "temporal": max(int(total_records), 1),
+            "plausibility": max(int(total_records), 1),
+            "referential": max(int(total_records), 1),
         }
 
-    def _grade(
-        self,
-        score: float,
-    ) -> str:
-        """
-        Convert numerical score into quality grade.
-        """
+        category_scores = {}
+        for name, weight in self.weights.items():
+            count = int(counts.get(name, 0))
+            denominator = denominators[name]
+            error_rate = min(count / denominator, 1.0)
+            category_scores[name] = {
+                "count": count,
+                "denominator": denominator,
+                "error_rate": round(error_rate, 6),
+                "score": round((1.0 - error_rate) * 100.0, 2),
+                "weight": round(weight, 6),
+            }
 
+        overall = sum(item["score"] * item["weight"] for item in category_scores.values())
+        return {
+            "overall_score": round(overall, 2),
+            "category_scores": category_scores,
+            "grade": self._grade(overall),
+        }
+
+    @staticmethod
+    def _grade(score: float) -> str:
         if score >= 95:
             return "Excellent"
-
         if score >= 85:
             return "Good"
-
         if score >= 70:
             return "Fair"
-
         if score >= 50:
             return "Poor"
-
         return "Critical"
