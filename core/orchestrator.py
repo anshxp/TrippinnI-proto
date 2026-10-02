@@ -176,6 +176,7 @@ class Orchestrator:
                     )
                     result.issues = self.confidence.aggregate(result.issues)
                     self.quality_results[table] = result
+                    self._save_quality_result(table, result)
                     detection_elapsed = time.monotonic() - detection_started
 
                     print(
@@ -240,6 +241,7 @@ class Orchestrator:
             result.issues = self.confidence.aggregate(result.issues)
 
             self.quality_results[table] = result
+            self._save_quality_result(table, result)
 
             release(dataframe, detection_frame)
             loader.clear_cache()
@@ -255,6 +257,21 @@ class Orchestrator:
 
     ##################################################################
 
+    def _save_quality_result(self, table: str, result) -> None:
+        """Persist one table-level Module 2 result immediately after detection."""
+        output_dir = config.OUTPUT_ROOT / "reports" / "quality"
+        output_dir.mkdir(parents=True, exist_ok=True)
+        safe_name = table.replace("/", "_").replace("\\", "_")
+        path = output_dir / f"{safe_name}.json"
+        temporary = path.with_suffix(".tmp")
+        try:
+            with temporary.open("w", encoding="utf-8") as handle:
+                json.dump(result.to_dict(), handle, indent=2, default=str)
+            temporary.replace(path)
+        except OSError as exc:
+            print(f"  Warning: could not save quality result for {table}: {exc}")
+
+    ##################################################################
     def _load_checkpoint(self) -> set[str]:
         """Load table names that completed the full pipeline previously."""
         if not self.checkpoint_path.exists():
