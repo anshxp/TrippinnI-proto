@@ -24,6 +24,11 @@ DETECTION_SAMPLE_SEED = 42
 
 # Local NVMe workspace (F:) for the prototype.
 # Override with environment variables if the dataset/workspace lives elsewhere.
-DATA_ROOT = Path(os.getenv("TRIPPINNI_DATA_ROOT", "F:/TrippinnI-data/raw"))
+DATA_ROOT = Path(
+    os.getenv(
+        "TRIPPINNI_DATA_ROOT",
+        r"F:\Ansh's\physionet.org\files\mimiciv\3.1",
+    )
+)
 WORK_ROOT = Path(os.getenv("TRIPPINNI_WORK_ROOT", "F:/TrippinnI-work"))
 OUTPUT_ROOT = WORK_ROOT / "outputs"
