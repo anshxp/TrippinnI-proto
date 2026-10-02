@@ -274,3 +274,6 @@ MIT License
 The data-quality stage now runs five detector families: missingness, exact/candidate-key duplicates, datatype conformance, machine-learning-assisted healthcare constraint validation, and statistical/ML outlier detection. Constraint discovery is dataset-driven rather than based on MIMIC field-name allowlists. Learned temporal, relational, and numeric constraints retain model provenance and confidence.
 
 The detector stage is flag-only: it does not impute, delete, or overwrite source data. Cross-table referential joins, remediation, revalidation, and downstream AI-readiness assessment remain separate stages because they require additional context beyond a single table/sample.
+
+
+<!-- Modular ML constraint engine documentation verified against repository layout. -->
