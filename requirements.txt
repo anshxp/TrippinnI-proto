@@ -1,12 +1,16 @@
 # Core Data Processing
 pandas>=2.2.0,<3.0
 numpy>=1.26.0,<2.4
+scipy>=1.13.0
 
-# Machine Learning
+# Machine Learning & Constraint Discovery
 scikit-learn>=1.5.0
 pyod>=2.0.0
 numba>=0.67.0
 llvmlite>=0.49.0
+
+# Optional Deep-Learning Constraint Learners
+# Used by the lazy-loaded autoencoder reconstruction learner.
 tensorflow>=2.17.0
 
 # NLP & Embeddings
