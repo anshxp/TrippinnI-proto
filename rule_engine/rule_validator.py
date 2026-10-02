@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from typing import Any, Callable, List
 
-import numpy as np
 import pandas as pd
 
 from detectors.base_detector import BaseDetector
@@ -84,7 +83,7 @@ class RuleValidator(BaseDetector):
                     issue_type="temporal", severity="HIGH", detector=self.name,
                     original_value={"start": str(df.at[idx, start_col]), "end": str(df.at[idx, end_col])},
                     expected_value=f"{start_col} <= {end_col}", confidence=constraint["confidence"],
-                    metadata={"rule": "inferred_temporal_order", "evidence": constraint["evidence"]},
+                    metadata={"rule": "ml_inferred_temporal_order", "evidence": constraint["evidence"], "model": constraint.get("model", "unknown")},
                 ))
         return issues
 
@@ -99,7 +98,7 @@ class RuleValidator(BaseDetector):
                     issue_type="referential", severity="HIGH", detector=self.name,
                     original_value=None, expected_value=f"{parent} present when {child} is present",
                     confidence=constraint["confidence"],
-                    metadata={"rule": "inferred_functional_dependency", "child": child, "evidence": constraint["evidence"]},
+                    metadata={"rule": "ml_inferred_functional_dependency", "child": child, "evidence": constraint["evidence"], "model": constraint.get("model", "unknown")},
                 ))
         return issues
 
@@ -117,8 +116,9 @@ class RuleValidator(BaseDetector):
                     expected_value={"lower": constraint["lower"], "upper": constraint["upper"]},
                     confidence=constraint["confidence"],
                     metadata={
-                        "rule": "inferred_empirical_plausibility",
+                        "rule": "ml_inferred_empirical_plausibility",
                         "evidence": constraint["evidence"],
+                        "model": constraint.get("model", "unknown"),
                         "clinical_reference_range": False,
                     },
                 ))
