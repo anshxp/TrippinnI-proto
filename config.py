@@ -19,6 +19,11 @@ CSV_CHUNK_SIZE = 100_000
 # reached, the reader stops and the remaining source data is never parsed.
 PROFILE_PREFIX_FRACTION = 0.10
 
+# Small unknown-row-count CSVs can be counted once before applying the prefix.
+# This keeps tiny metadata tables such as provider.csv.gz exact without
+# introducing a full scan for large tables.
+CSV_ROW_COUNT_FALLBACK_MAX_MB = 10
+
 # Quality detectors still receive a bounded in-memory sample.
 MAX_ROWS_FOR_DETECTION = 10_000
 DETECTION_SAMPLE_SEED = 42
