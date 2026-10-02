@@ -23,12 +23,18 @@ The framework combines deterministic validation rules, machine learning algorith
   - Isolation Forest
   - COPOD (PyOD)
   - MLP autoencoder reconstruction
+- Machine-learning-assisted healthcare constraint discovery
+  - Isolation Forest learns temporal ordering from timestamp-pair distributions
+  - Isolation Forest learns identifier dependency patterns
+  - Isolation Forest learns empirical numeric support regions
+  - Binary domains are inferred from observed value support
+  - Every learned constraint records model provenance and confidence
 - Healthcare rule validation
-  - Required MIMIC-IV identifiers and timestamps
-  - Temporal ordering checks
-  - Identifier hierarchy checks
+  - Required structural fields remain explicit schema facts
+  - Temporal ordering checks use learned constraints
+  - Identifier hierarchy checks use learned relational constraints
   - Identifier format/conformance checks
-  - Conservative clinical plausibility checks
+  - Empirical plausibility checks (not clinical reference ranges)
 - Confidence aggregation
   - Weighted Voting
   - Bias–Variance
@@ -265,6 +271,6 @@ python app.py
 MIT License
 ## Module 2 implementation status
 
-The data-quality stage now runs five detector families: missingness, exact/candidate-key duplicates, datatype conformance, healthcare-aware deterministic rules, and statistical/ML outlier detection. The stage also produces a dimension-specific quality score and records the bounded detection-sample coverage.
+The data-quality stage now runs five detector families: missingness, exact/candidate-key duplicates, datatype conformance, machine-learning-assisted healthcare constraint validation, and statistical/ML outlier detection. Constraint discovery is dataset-driven rather than based on MIMIC field-name allowlists. Learned temporal, relational, and numeric constraints retain model provenance and confidence.
 
 The detector stage is flag-only: it does not impute, delete, or overwrite source data. Cross-table referential joins, remediation, revalidation, and downstream AI-readiness assessment remain separate stages because they require additional context beyond a single table/sample.
