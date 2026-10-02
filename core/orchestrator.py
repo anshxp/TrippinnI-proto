@@ -43,7 +43,7 @@ class Orchestrator:
         # so you can watch RSS stay bounded across a real 10GB run
         # instead of taking it on faith.
         self._process = psutil.Process()
-        self._checkpoint_version = 2
+        self._checkpoint_version = 3
 
     ##################################################################
 
@@ -90,7 +90,6 @@ class Orchestrator:
                 continue
 
             if hasattr(loader, "get_dataframe_chunks"):
-                # Both MimicLoader and SyntheaLoader expose this now.
                 # Profiling stays fully streaming (never holds the whole
                 # table). Detection gets a reservoir-sampled subset built
                 # in the same pass, so MissingDetector/DuplicateDetector/
@@ -99,6 +98,13 @@ class Orchestrator:
                 source_path = self._get_source_path(loader, table)
                 total_rows = self._get_mimic_row_count(table)
                 file_size_mb = source_path.stat().st_size / (1024 ** 2)
+
+                if total_rows <= 0 and hasattr(loader, "get_row_count"):
+                    if file_size_mb <= config.CSV_ROW_COUNT_FALLBACK_MAX_MB:
+                        total_rows = loader.get_row_count(
+                            table,
+                            max_file_size_mb=config.CSV_ROW_COUNT_FALLBACK_MAX_MB,
+                        )
 
                 print()
                 print("-" * 78)
@@ -114,7 +120,7 @@ class Orchestrator:
                         f"(MIMIC-IV v3.1 reference row count)"
                     )
                 else:
-                    print("  Estimated data rows: unavailable (streaming count)")
+                    print("  Estimated data rows: unavailable")
                 print(f"  Chunk size: {config.CSV_CHUNK_SIZE:,} rows")
                 prefix_rows = (
                     max(1, int(total_rows * config.PROFILE_PREFIX_FRACTION))
@@ -257,7 +263,10 @@ class Orchestrator:
             with self.checkpoint_path.open("r", encoding="utf-8") as handle:
                 data = json.load(handle)
             if data.get("version") != self._checkpoint_version:
-                print("  Checkpoint version changed; restarting profiling with the new prefix policy.")
+                print(
+                    "  Checkpoint version changed; restarting profiling "
+                    "with the current prefix policy."
+                )
                 return set()
             return set(data.get("completed_tables", []))
         except (OSError, ValueError, TypeError):
