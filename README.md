@@ -60,6 +60,7 @@ Data Quality Assessment
 ├── Missing Detection
 ├── Duplicate Detection
 ├── Datatype Validation
+├── Healthcare Rule Validation
 └── Outlier Detection
         │
         ▼
@@ -121,6 +122,9 @@ Duplicate Detector
    │
    ▼
 Datatype Detector
+   │
+   ▼
+Healthcare Rule Validator
    │
    ▼
 Outlier Detector
