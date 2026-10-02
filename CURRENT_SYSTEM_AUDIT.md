@@ -1,3 +1,22 @@
+# CURRENT SYSTEM AUDIT — ML CONSTRAINT UPDATE
+
+## Constraint discovery update
+
+The constraint-learning layer has been upgraded from lexical/heuristic inference to unsupervised machine-learning-assisted discovery in `rule_engine/constraint_inference.py`.
+
+- Temporal constraints are learned from timestamp-pair distributions with `IsolationForest`; no start/end field-name vocabulary is required.
+- Identifier hierarchy candidates are learned from relational frequency features and an `IsolationForest`, then retained only when the observed child-to-parent mapping is functionally dependent.
+- Numeric plausibility regions are learned with `IsolationForest` rather than fixed field-specific ranges.
+- Binary domains are inferred from observed two-state support.
+- Each learned constraint records model provenance, evidence, and confidence.
+- Required structural fields in `rule_engine/rules.py` remain explicit schema facts. They are not learned clinical constraints.
+- The learned numeric boundaries are empirical dataset-support boundaries, not clinical reference ranges. Clinical reference ranges require an external, provenance-tracked source.
+- Identifier format validation remains profile-derived because numeric/non-negative/integer-like representation is a conformance property rather than a learned clinical range.
+
+This distinction is intentional: peer-reviewed EHR data-quality literature describes plausibility as context-dependent and supports data-driven assessment, but clinical validity should not be inferred solely from an unlabeled sample. The current implementation therefore uses ML to discover empirical constraints and preserves provenance rather than presenting those boundaries as medical truth.
+
+---
+
 # CURRENT SYSTEM AUDIT
 
 This audit reviews the repository as a healthcare data-quality and preprocessing platform intended to support MIMIC‑IV datasets. It documents architecture, implemented pipeline stages, MIMIC‑IV-specific support (tables/fields), all implemented data-quality rules (exactly as implemented), traceability, safety risks, security/compliance observations, missing components, tests and reproducibility, and prioritized next actions. Findings cite exact files and line ranges.
