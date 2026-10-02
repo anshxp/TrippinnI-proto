@@ -298,3 +298,14 @@ The repository now has an implemented Module 2 data-quality stage beyond the ori
 - Regression tests were added under `tests/test_detectors.py`.
 
 The quality stage remains flag-only. It does not automatically impute, delete, or overwrite records. The current orchestration evaluates a bounded in-memory detection sample per table; therefore detector issue counts and the quality score describe the evaluated sample, not an exact full-table error count. Profiling can cover a larger source prefix. Cross-table joins, remediation, revalidation, and AI-readiness are intentionally not represented as completed by this Module 2 update.
+
+### Automatic constraint inference update
+
+The healthcare rule layer no longer uses hardcoded column-specific temporal or clinical ranges for temporal consistency, identifier hierarchy, or numeric plausibility. The constraint inference module derives:
+
+- temporal relationships from inferred datetime semantics and start/end role evidence;
+- identifier parent-child relationships from identifier cardinality and functional-dependency evidence;
+- numeric plausibility envelopes from robust empirical distributions;
+- binary-domain constraints from inferred boolean/flag semantics.
+
+The inferred constraint, evidence, and confidence are retained in the quality result. The implementation explicitly distinguishes an empirical plausibility envelope from a clinical reference range. A true clinical reference range cannot safely be invented from the observed distribution; it requires semantic metadata, a terminology/reference source, or another validated clinical knowledge source. MIMIC-IV itself notes that implausible values may occur and that users should apply appropriate validation.
