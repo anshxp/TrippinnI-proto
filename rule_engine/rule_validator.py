@@ -9,7 +9,7 @@ import pandas as pd
 from detectors.base_detector import BaseDetector
 from models.detector_result import DetectorResult
 from models.issue import Issue
-from rule_engine.constraint_inference import ConstraintInferer
+from rule_engine.constraint_engine import ConstraintEngine
 from rule_engine.rules import MIMIC_REQUIRED_FIELDS
 
 
@@ -18,7 +18,7 @@ class RuleValidator(BaseDetector):
 
     def __init__(self) -> None:
         super().__init__("RuleValidator")
-        self.inferer = ConstraintInferer()
+        self.constraint_engine = ConstraintEngine()
         self.rules: List[Callable] = [
             self.check_missing_required,
             self.check_inferred_temporal_consistency,
@@ -33,7 +33,7 @@ class RuleValidator(BaseDetector):
             if not isinstance(dataframe, pd.DataFrame):
                 continue
             table_profile = profile if isinstance(profile, dict) else {}
-            inferred = self.inferer.infer(dataframe, table_profile)
+            inferred = self.constraint_engine.infer(dataframe, table_profile)
             table_issues = []
             for rule in self.rules:
                 table_issues.extend(rule(table_name, dataframe, table_profile, inferred))
