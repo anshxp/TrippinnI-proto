@@ -46,6 +46,7 @@ class ConstraintInferer:
     _START_TOKENS = {"start", "begin", "from", "in", "admit", "admission", "register", "reg", "birth", "onset"}
     _END_TOKENS = {"end", "stop", "to", "out", "discharge", "death", "expire", "finish"}
     _TIME_TOKENS = {"time", "date", "datetime", "timestamp"}
+    _BINARY_TOKENS = {"flag", "indicator", "boolean", "bool", "status"}
 
     def infer(self, dataframe: pd.DataFrame, profile: dict[str, Any] | None = None) -> dict[str, list[dict[str, Any]]]:
         profile = profile or {}
@@ -53,6 +54,7 @@ class ConstraintInferer:
             "temporal": [asdict(x) for x in self.infer_temporal(dataframe, profile)],
             "hierarchy": [asdict(x) for x in self.infer_hierarchy(dataframe, profile)],
             "numeric": [asdict(x) for x in self.infer_numeric(dataframe, profile)],
+            "binary": [asdict(x) for x in self.infer_binary(dataframe, profile)],
         }
 
     def infer_temporal(self, df: pd.DataFrame, profile: dict[str, Any]) -> list[TemporalConstraint]:
@@ -100,6 +102,28 @@ class ConstraintInferer:
             constraints.append(HierarchyConstraint(child, parent, confidence, "functional-dependency and cardinality inference"))
         return constraints
 
+    def infer_binary(self, df: pd.DataFrame, profile: dict[str, Any]) -> list[NumericConstraint]:
+        """Infer binary-domain constraints from semantic type and observed support."""
+        column_profiles = profile.get("columns", {})
+        constraints = []
+        for column in df.columns:
+            meta = column_profiles.get(column, {})
+            values = pd.to_numeric(df[column], errors="coerce").dropna()
+            if values.empty or values.nunique() > 2:
+                continue
+            name_tokens = set(column.lower().replace("-", "_").split("_"))
+            semantic = meta.get("semantic_type")
+            if semantic == "boolean" or name_tokens & self._BINARY_TOKENS:
+                observed = sorted(values.unique().tolist())
+                if all(float(v).is_integer() for v in observed):
+                    lower = min(observed)
+                    upper = max(observed)
+                    if lower == 0 and upper == 1:
+                        constraints.append(NumericConstraint(
+                            column, 0.0, 1.0, 0.95,
+                            "binary semantic type/flag inference"
+                        ))
+        return constraints
     def infer_numeric(self, df: pd.DataFrame, profile: dict[str, Any]) -> list[NumericConstraint]:
         column_profiles = profile.get("columns", {})
         constraints = []
@@ -125,7 +149,8 @@ class ConstraintInferer:
 
     @classmethod
     def _temporal_role_score(cls, name: str, role: str) -> int:
-        tokens = {token for token in name.lower().replace("-", "_").split("_") if token}
+        normalized = name.lower().replace("-", "_")
+        tokens = {token for token in normalized.split("_") if token}
         tokens.discard("datetime")
         tokens.discard("timestamp")
         score = 0
@@ -133,6 +158,8 @@ class ConstraintInferer:
             score += 1
         target = cls._START_TOKENS if role == "start" else cls._END_TOKENS
         score += 2 * len(tokens & target)
+        if any(token in normalized for token in target):
+            score += 2
         return score
 
     @staticmethod
