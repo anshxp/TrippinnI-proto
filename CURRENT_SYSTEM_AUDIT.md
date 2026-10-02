@@ -280,3 +280,21 @@ Appendix: key code locations (quick reference)
 If you want, I can now:
 - (A) Run the repository's pipeline on a small synthetic MIMIC subset (if you provide data) and produce sample profiling/quality outputs, or
 - (B) Implement one of the prioritized next actions (pick one) and provide a patch and tests.
+
+
+---
+
+## 2026-10-02 Module 2 completion update
+
+The repository now has an implemented Module 2 data-quality stage beyond the original scaffolding:
+
+- `MissingDetector`: missing-cell issues with semantic-aware severity and column missingness metadata.
+- `DuplicateDetector`: exact duplicate rows plus duplicates on profiler-identified candidate primary keys.
+- `DatatypeDetector`: value-level conformance against profiled physical validation types.
+- `RuleValidator`: required MIMIC-IV identifiers/timestamps, temporal ordering, conservative plausibility ranges, identifier hierarchy, and identifier-format checks.
+- `OutlierDetector`: robust IQR detection, Isolation Forest, PyOD COPOD, and an MLP reconstruction-based autoencoder, with bounded per-method issue counts.
+- `QualityScore`: dimension-specific scoring for missingness, uniqueness, datatype conformance, outliers, conformance, temporal validity, plausibility, and referential consistency.
+- `QualityDetector`: all detectors are orchestrated and the quality score plus detection-sample coverage are attached to the `QualityResult`.
+- Regression tests were added under `tests/test_detectors.py`.
+
+The quality stage remains flag-only. It does not automatically impute, delete, or overwrite records. The current orchestration evaluates a bounded in-memory detection sample per table; therefore detector issue counts and the quality score describe the evaluated sample, not an exact full-table error count. Profiling can cover a larger source prefix. Cross-table joins, remediation, revalidation, and AI-readiness are intentionally not represented as completed by this Module 2 update.
