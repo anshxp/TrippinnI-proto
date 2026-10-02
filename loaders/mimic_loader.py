@@ -70,6 +70,20 @@ class MimicLoader(BaseLoader):
             total_rows=total_rows,
         )
 
+    def get_row_count(
+        self,
+        table_name: str,
+        *,
+        max_file_size_mb: float = 10,
+    ) -> int:
+        """Count rows for a small table whose reference count is unavailable."""
+        file_path = self.catalog.get_table_path(table_name.lower())
+        return self.reader.count_rows(
+            file_path,
+            chunksize=100_000,
+            max_file_size_mb=max_file_size_mb,
+        )
+
     def get_schema(self):
         schema = {}
 
