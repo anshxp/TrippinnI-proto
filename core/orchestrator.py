@@ -44,6 +44,7 @@ class Orchestrator:
         # so you can watch RSS stay bounded across a real 10GB run
         # instead of taking it on faith.
         self._process = psutil.Process()
+        self._checkpoint_version = 2
 
     ##################################################################
 
@@ -97,7 +98,7 @@ class Orchestrator:
                 # etc. (which expect a real in-memory DataFrame) still
                 # run, without ever materializing the full table.
                 source_path = self._get_source_path(loader, table)
-                total_rows = self._estimate_data_rows(source_path)
+                total_rows = self._get_mimic_row_count(table)
                 file_size_mb = source_path.stat().st_size / (1024 ** 2)
 
                 print()
@@ -116,14 +117,21 @@ class Orchestrator:
                 else:
                     print("  Estimated data rows: unavailable (streaming count)")
                 print(f"  Chunk size: {config.CSV_CHUNK_SIZE:,} rows")
-                print(f"  Prototype sample fraction: {config.PROFILE_SAMPLE_FRACTION:.0%}")
-                print("  Stage: streaming sampled rows + profiling + key detection")
+                prefix_rows = (
+                    max(1, int(total_rows * config.PROFILE_PREFIX_FRACTION))
+                    if total_rows > 0
+                    else 0
+                )
+                print(f"  Prototype prefix: first {config.PROFILE_PREFIX_FRACTION:.0%} of rows")
+                if prefix_rows > 0:
+                    print(f"  Prefix row limit: {prefix_rows:,} of {total_rows:,}")
+                print("  Stage: first-prefix streaming + profiling + key detection")
 
                 chunks = loader.get_dataframe_chunks(
                     table,
                     chunksize=config.CSV_CHUNK_SIZE,
-                    sample_fraction=config.PROFILE_SAMPLE_FRACTION,
-                    sample_seed=config.PROFILE_SAMPLE_SEED,
+                    prefix_fraction=config.PROFILE_PREFIX_FRACTION,
+                    total_rows=total_rows,
                 )
                 progress_chunks = self._progress_chunks(
                     chunks,
@@ -249,6 +257,9 @@ class Orchestrator:
         try:
             with self.checkpoint_path.open("r", encoding="utf-8") as handle:
                 data = json.load(handle)
+            if data.get("version") != self._checkpoint_version:
+                print("  Checkpoint version changed; restarting profiling with the new prefix policy.")
+                return set()
             return set(data.get("completed_tables", []))
         except (OSError, ValueError, TypeError):
             print("  Warning: checkpoint could not be read; starting without resume state.")
@@ -259,7 +270,7 @@ class Orchestrator:
         completed = self._load_checkpoint()
         completed.add(table)
         payload = {
-            "version": 1,
+            "version": self._checkpoint_version,
             "completed_tables": sorted(completed),
         }
         temporary = self.checkpoint_path.with_suffix(".tmp")
@@ -283,24 +294,11 @@ class Orchestrator:
     ##################################################################
 
     @staticmethod
-    def _estimate_data_rows(source_path: Path) -> int:
-        """Return a row estimate without pre-scanning compressed CSV files.
+    def _get_mimic_row_count(table: str) -> int:
+        """Return the known MIMIC-IV v3.1 row count for a table."""
+        return int(config.MIMIC_V31_ROW_COUNTS.get(table.lower(), 0))
 
-        A full gzip line-count scan decompresses the entire file before the
-        actual streaming profiler starts. That duplicates I/O and can expose
-        large MIMIC-IV files to an unnecessary second decompression pass.
-        For compressed CSVs, the streaming profiler is the authoritative row
-        counter, so return 0 and let live progress report rows processed.
-        """
-        if source_path.name.lower().endswith(".gz"):
-            return 0
-
-        try:
-            with open(source_path, "rb") as handle:
-                line_count = sum(1 for _ in handle)
-        except (OSError, EOFError):
-            return 0
-        return max(line_count - 1, 0)
+    ##################################################################
 
     ##################################################################
 
