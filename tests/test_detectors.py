@@ -52,8 +52,9 @@ def test_mimic_rule_validator_flags_temporal_and_hierarchy_errors():
             ["2024-01-02"] * 20 + ["2024-01-04"] * 20
         ),
         "dischtime": pd.to_datetime(
-            ["2024-01-01"] + ["2024-01-03"] * 19
-            + ["2024-01-05"] * 20
+            ["2024-01-01"]
+            + [f"2024-01-{3 + (i % 5):02d}" for i in range(19)]
+            + [f"2024-01-{5 + (i % 5):02d}" for i in range(20)]
         ),
     })
     # Inject one hierarchy violation without changing the learned dependency.
@@ -85,7 +86,8 @@ def test_constraints_are_ml_inferred_without_table_specific_ranges():
             ["2024-01-01"] * 50 + ["2024-01-10"] * 50
         ),
         "dischtime": pd.to_datetime(
-            ["2024-01-02"] * 50 + ["2024-01-11"] * 50
+            [f"2024-01-{2 + (i % 10):02d}" for i in range(50)]
+            + [f"2024-01-{11 + (i % 10):02d}" for i in range(50)]
         ),
         "hospital_expire_flag": [0, 1] * 50,
         "numeric_measure": [10.0 + (i % 20) * 0.5 for i in range(rows)],
