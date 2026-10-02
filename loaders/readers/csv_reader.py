@@ -89,6 +89,36 @@ class CsvReader:
 
         return pd.read_csv(file_path, **options)
 
+    def count_rows(
+        self,
+        file_path: str | Path,
+        *,
+        chunksize: int = 100_000,
+        max_file_size_mb: float = 10,
+    ) -> int:
+        """Count rows in a bounded-size CSV without materializing it."""
+        file_path = Path(file_path)
+
+        if not file_path.exists():
+            raise FileNotFoundError(f"CSV file not found: {file_path}")
+        if not self.supports(file_path):
+            raise ValueError(f"Unsupported file type: {file_path.name}")
+        if chunksize <= 0:
+            raise ValueError("chunksize must be greater than zero")
+
+        size_mb = file_path.stat().st_size / (1024 ** 2)
+        if size_mb > max_file_size_mb:
+            raise ValueError(
+                f"Cannot count unknown row count for large file "
+                f"{file_path.name} ({size_mb:.1f} MB > {max_file_size_mb:.1f} MB)"
+            )
+
+        options = self._read_options(chunksize=chunksize)
+        total = 0
+        for chunk in pd.read_csv(file_path, **options):
+            total += len(chunk)
+        return total
+
     def supports(self, file_path: str | Path) -> bool:
         """Return True if this reader supports the file."""
         path = Path(file_path)
