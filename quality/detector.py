@@ -52,4 +52,12 @@ class QualityDetector:
         )
         quality.quality_score = score["overall_score"]
         quality.summary = score
+        if isinstance(profile, dict):
+            profile_rows = int(profile.get("dataset", {}).get("rows", total_records))
+            quality.summary["evaluation"] = {
+                "sample_rows": int(total_records),
+                "profile_rows": profile_rows,
+                "sample_fraction_of_profile": round(total_records / max(profile_rows, 1), 6),
+                "scope": "bounded detection sample; profiling may cover a larger prefix",
+            }
         return quality
