@@ -1,3 +1,5 @@
+from pathlib import Path
+
 from core.pipeline import Pipeline
 from config import DATA_ROOT
 
