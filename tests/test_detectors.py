@@ -57,3 +57,39 @@ def test_quality_detector_produces_bounded_score():
 
     assert 0.0 <= result.quality_score <= 100.0
     assert result.summary["overall_score"] == result.quality_score
+
+def test_constraints_are_inferred_without_table_specific_ranges():
+    from rule_engine.constraint_inference import ConstraintInferer
+
+    df = pd.DataFrame({
+        "subject_id": [1, 1, 2, 2],
+        "hadm_id": [10, 10, 20, 20],
+        "admittime": pd.to_datetime(["2024-01-01"] * 4),
+        "dischtime": pd.to_datetime(["2024-01-02"] * 4),
+        "hospital_expire_flag": [0, 1, 0, 1],
+        "numeric_measure": [10.0, 11.0, 10.5, 11.5],
+    })
+    profile = {
+        "columns": {
+            "subject_id": {"semantic_type": "identifier", "validation_type": "integer"},
+            "hadm_id": {"semantic_type": "identifier", "validation_type": "integer"},
+            "admittime": {"semantic_type": "datetime", "validation_type": "datetime"},
+            "dischtime": {"semantic_type": "datetime", "validation_type": "datetime"},
+            "hospital_expire_flag": {"semantic_type": "numeric", "validation_type": "integer"},
+            "numeric_measure": {"semantic_type": "numeric", "validation_type": "float"},
+        }
+    }
+    inferred = ConstraintInferer().infer(df, profile)
+
+    assert any(
+        x["start"] == "admittime" and x["end"] == "dischtime"
+        for x in inferred["temporal"]
+    )
+    assert any(
+        x["child"] == "hadm_id" and x["parent"] == "subject_id"
+        for x in inferred["hierarchy"]
+    )
+    assert any(
+        x["column"] == "hospital_expire_flag"
+        for x in inferred["binary"]
+    )
