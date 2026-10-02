@@ -58,20 +58,16 @@ class MimicLoader(BaseLoader):
         self,
         table_name: str,
         chunksize: int = 100000,
-        sample_fraction: float = 1.0,
-        sample_seed: int | None = None,
+        prefix_fraction: float = 1.0,
+        total_rows: int | None = None,
     ):
-        """Yield uncached DataFrame chunks for a MIMIC table.
-
-        Sampling is performed by CsvReader before chunks reach the
-        profiling pipeline, keeping the prototype stream bounded.
-        """
+        """Yield only the deterministic first prefix of a MIMIC table."""
         file_path = self.catalog.get_table_path(table_name.lower())
         return self.reader.read_chunks(
             file_path,
             chunksize=chunksize,
-            sample_fraction=sample_fraction,
-            sample_seed=sample_seed,
+            prefix_fraction=prefix_fraction,
+            total_rows=total_rows,
         )
 
     def get_schema(self):
