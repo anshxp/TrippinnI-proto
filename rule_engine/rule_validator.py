@@ -136,7 +136,13 @@ class RuleValidator(BaseDetector):
                 continue
             if "code" in name:
                 continue
-            semantic = columns.get(column, {}).get("semantic_type")
+            column_meta = columns.get(column, {})
+            semantic = column_meta.get("semantic_type")
+            validation_type = column_meta.get("validation_type")
+            # MIMIC provider_id and provider-like identifiers are strings;
+            # only apply numeric identifier checks to physically numeric IDs.
+            if validation_type not in {"integer", "float"} and pd.api.types.is_numeric_dtype(df[column]) is False:
+                continue
             if semantic and semantic not in {"identifier", "numeric"}:
                 continue
             values = pd.to_numeric(df[column], errors="coerce")
