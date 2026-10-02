@@ -54,10 +54,25 @@ class MimicLoader(BaseLoader):
         self.catalog.cache_dataframe(table_name, dataframe)
         return dataframe
 
-    def get_dataframe_chunks(self, table_name: str, chunksize: int = 100000):
-        """Yield uncached DataFrame chunks for a MIMIC table."""
+    def get_dataframe_chunks(
+        self,
+        table_name: str,
+        chunksize: int = 100000,
+        sample_fraction: float = 1.0,
+        sample_seed: int | None = None,
+    ):
+        """Yield uncached DataFrame chunks for a MIMIC table.
+
+        Sampling is performed by CsvReader before chunks reach the
+        profiling pipeline, keeping the prototype stream bounded.
+        """
         file_path = self.catalog.get_table_path(table_name.lower())
-        return self.reader.read_chunks(file_path, chunksize=chunksize)
+        return self.reader.read_chunks(
+            file_path,
+            chunksize=chunksize,
+            sample_fraction=sample_fraction,
+            sample_seed=sample_seed,
+        )
 
     def get_schema(self):
         schema = {}
