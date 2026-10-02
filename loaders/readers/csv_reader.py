@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from pathlib import Path
 from typing import Iterator
-import random
 
 import pandas as pd
 
@@ -57,10 +56,15 @@ class CsvReader:
         self,
         file_path: str | Path,
         chunksize: int = 100000,
-        sample_fraction: float = 1.0,
-        sample_seed: int | None = None,
+        prefix_fraction: float = 1.0,
+        total_rows: int | None = None,
     ) -> Iterator[pd.DataFrame]:
-        """Read a CSV as an iterator of DataFrame chunks."""
+        """Read only the deterministic first prefix of a CSV.
+
+        ``prefix_fraction`` is converted to an exact row limit using the
+        supplied dataset row count. Pandas then stops parsing at that
+        limit, so the remaining source rows are never scanned.
+        """
         file_path = Path(file_path)
 
         if not file_path.exists():
@@ -71,27 +75,19 @@ class CsvReader:
 
         if chunksize <= 0:
             raise ValueError("chunksize must be greater than zero")
-        if not 0 < sample_fraction <= 1:
-            raise ValueError("sample_fraction must be in the interval (0, 1]")
+        if not 0 < prefix_fraction <= 1:
+            raise ValueError("prefix_fraction must be in the interval (0, 1]")
+        if prefix_fraction < 1.0 and (total_rows is None or total_rows <= 0):
+            raise ValueError(
+                "total_rows is required when reading a prefix smaller than 100%"
+            )
 
-        reader = pd.read_csv(
-            file_path,
-            **self._read_options(chunksize=chunksize),
-        )
+        options = self._read_options(chunksize=chunksize)
 
-        if sample_fraction >= 1.0:
-            return reader
+        if prefix_fraction < 1.0:
+            options["nrows"] = max(1, int(total_rows * prefix_fraction))
 
-        rng = random.Random(sample_seed)
-
-        def sampled_chunks() -> Iterator[pd.DataFrame]:
-            for chunk in reader:
-                mask = [rng.random() < sample_fraction for _ in range(len(chunk))]
-                sampled = chunk.loc[mask]
-                if not sampled.empty:
-                    yield sampled
-
-        return sampled_chunks()
+        return pd.read_csv(file_path, **options)
 
     def supports(self, file_path: str | Path) -> bool:
         """Return True if this reader supports the file."""
