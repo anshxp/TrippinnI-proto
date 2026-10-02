@@ -105,7 +105,7 @@ class RuleValidator(BaseDetector):
 
     def check_inferred_numeric_plausibility(self, table, df, profile, inferred) -> List[Issue]:
         issues = []
-        for constraint in inferred.get("numeric", []):
+        for constraint in inferred.get("binary", []) + inferred.get("numeric", []):
             column = constraint["column"]
             values = pd.to_numeric(df[column], errors="coerce")
             invalid = values.notna() & ((values < constraint["lower"]) | (values > constraint["upper"]))
