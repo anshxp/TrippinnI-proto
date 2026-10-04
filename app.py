@@ -54,6 +54,15 @@ for table, profile in orchestrator.get_profiles().items():
 
 print()
 print("=" * 60)
+print("Healthcare Context Summary")
+print("=" * 60)
+if orchestrator.knowledge_graph is not None:
+    print("  graph nodes:", len(orchestrator.knowledge_graph.nodes))
+    print("  graph edges:", len(orchestrator.knowledge_graph.edges))
+print("  persisted report: outputs/reports/context/healthcare_context.json")
+
+print()
+print("=" * 60)
 print("Quality Detection Summary")
 print("=" * 60)
 for table, result in orchestrator.get_quality_results().items():
