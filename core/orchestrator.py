@@ -74,7 +74,10 @@ class Orchestrator:
         total_tables = len(tables)
         completed_tables = self._load_checkpoint()
 
+        # Resume must restore persisted summaries as well as the checkpoint;
+        # otherwise a fully completed run appears empty to downstream callers.
         if completed_tables:
+            self._load_persisted_results(completed_tables)
             print()
             print(f"RESUME: skipping {len(completed_tables):,} completed table(s)")
 
@@ -254,6 +257,49 @@ class Orchestrator:
         print("=" * 78)
         print("Dataset profiling and quality detection completed.")
         print("=" * 78)
+
+    ##################################################################
+
+    def _load_persisted_results(self, tables: set[str]) -> None:
+        """Restore completed table reports when a checkpointed run resumes."""
+        profiling_dir = config.OUTPUT_ROOT / "reports" / "profiling"
+        quality_dir = config.OUTPUT_ROOT / "reports" / "quality"
+
+        for table in tables:
+            profile_path = profiling_dir / f"{table}_profile.json"
+            if profile_path.exists():
+                try:
+                    with profile_path.open("r", encoding="utf-8") as handle:
+                        self.profiles[table] = json.load(handle)
+                except (OSError, ValueError, TypeError) as exc:
+                    print(f"  Warning: could not restore profile for {table}: {exc}")
+
+            quality_path = quality_dir / f"{table}.json"
+            if quality_path.exists():
+                try:
+                    from models.detector_result import DetectorResult
+                    from models.issue import Issue
+                    from models.quality_result import QualityResult
+
+                    with quality_path.open("r", encoding="utf-8") as handle:
+                        payload = json.load(handle)
+
+                    detectors = [
+                        DetectorResult.from_dict(item)
+                        for item in payload.get("detectors", [])
+                    ]
+                    issues = [
+                        Issue.from_dict(item)
+                        for item in payload.get("issues", [])
+                    ]
+                    self.quality_results[table] = QualityResult(
+                        detector_results=detectors,
+                        issues=issues,
+                        quality_score=float(payload.get("quality_score", 0.0)),
+                        summary=payload.get("summary", {}),
+                    )
+                except (OSError, ValueError, TypeError, KeyError, AttributeError) as exc:
+                    print(f"  Warning: could not restore quality result for {table}: {exc}")
 
     ##################################################################
 
