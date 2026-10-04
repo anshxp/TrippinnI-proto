@@ -81,7 +81,7 @@ class KnowledgeGraphBuilder:
             columns = table_context.get("columns", {})
             for column, context in columns.items():
                 column_id = f"column:{table}.{column}"
-                graph.add_node(column_id, "field", table=table, column=column, **context)
+                graph.add_node(column_id, "field", table=table, **context)
                 graph.add_edge(table_id, column_id, "HAS_FIELD", context.get("confidence", 0.5))
 
                 roles = set(context.get("roles", []))
