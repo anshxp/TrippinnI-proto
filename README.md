@@ -4,7 +4,7 @@
 
 TrippinnI is an AI-powered healthcare data quality framework designed to preprocess, validate, and refine Electronic Health Records (EHR) and Electronic Medical Records (EMR) before they are used for analytics, machine learning, or clinical decision support.
 
-The framework combines deterministic validation rules, machine learning algorithms, and Large Language Models (LLMs) to identify and explain data quality issues while producing an overall quality assessment.
+The framework combines healthcare-aware profiling, semantic context inference, a lightweight knowledge graph, deterministic validation rules, machine learning algorithms, and explainability to identify and contextualize data quality issues while producing an overall quality assessment. MIMIC-IV is used as a validation dataset for the prototype; product logic is designed to remain dataset-agnostic across EHR/EMR and other healthcare data sources.
 
 ---
 
@@ -49,37 +49,53 @@ The framework combines deterministic validation rules, machine learning algorith
 # Architecture
 
 ```
-Dataset
+Healthcare Dataset
    │
    ▼
-Module 0
-Dataset Loading
+Module 0 — Loading
    │
    ▼
-Module 1
-Dataset Profiling
+Module 1 — Healthcare Data Profiling
    │
    ▼
-Module 2
-Data Quality Assessment
-│
-├── Missing Detection
-├── Duplicate Detection
-├── Datatype Validation
-├── Healthcare Rule Validation
-└── Outlier Detection
-        │
-        ▼
+Semantic Context Layer
+   │
+   ├── Entity/field roles
+   ├── Temporal context
+   ├── Clinical-field hints
+   ├── Candidate keys
+   └── Candidate relationships
+   │
+   ▼
+Healthcare Knowledge Graph
+   │
+   ├── Tables / fields
+   ├── Semantic roles
+   ├── Candidate identifiers
+   ├── Temporal attributes
+   └── Cross-table relationship candidates
+   │
+   ▼
+Module 2 — Context-Aware Quality Detection
+   │
+   ├── Missingness
+   ├── Duplicate / identity
+   ├── Datatype / conformance
+   ├── Rule validation
+   ├── Outliers
+   └── Cross-table structural context
+   │
+   ▼
 Confidence Aggregation
-        │
-        ▼
+   │
+   ▼
 Quality Score
-        │
-        ▼
-LLM Explainability
-        │
-        ▼
-Quality Report
+   │
+   ▼
+Explainability
+   │
+   ▼
+Remediation → Revalidation → AI Readiness
 ```
 
 ---
@@ -277,3 +293,25 @@ The detector stage is flag-only: it does not impute, delete, or overwrite source
 
 
 <!-- Modular ML constraint engine documentation verified against repository layout. -->
+
+
+## Healthcare semantic context and knowledge graph
+
+The prototype now builds a dataset-agnostic semantic context from profiling metadata and a lightweight knowledge graph before the final pipeline report is written.
+
+The context layer deliberately uses conservative inference. It can identify candidate roles such as entity identifier, event time, clinical attribute, and measurement unit from observed schema/profile metadata. These are hypotheses with confidence, not hard-coded claims about a specific source system.
+
+The knowledge graph represents:
+- table and field nodes
+- semantic field roles
+- candidate primary/foreign-key relationships
+- shared identifier relationship candidates
+- temporal and clinical semantic roles
+
+Detected issues are enriched with graph context so downstream reports can explain why a field is being evaluated in a particular semantic role.
+
+Cross-table analysis currently reports structural relationship candidates. It does not claim value-level referential integrity without synchronized multi-table data. That distinction is intentional and keeps the prototype honest across arbitrary healthcare datasets.
+
+The generated context artifact is written to outputs/reports/context/healthcare_context.json.
+
+MIMIC-IV remains a validation dataset, not the product's schema contract. Future terminology adapters can map inferred clinical concepts to standards such as FHIR, OMOP, SNOMED CT, LOINC, RxNorm, CPT/HCPCS, or UCUM without making those standards mandatory for every dataset.
