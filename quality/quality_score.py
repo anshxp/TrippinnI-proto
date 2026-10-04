@@ -43,6 +43,16 @@ class QualityScore:
         self, issues: List[Issue], total_records: int, total_cells: int | None = None
     ) -> dict:
         counts = Counter(issue.issue_type.lower() for issue in issues)
+
+        # Missingness findings are column-level aggregates. Their metadata
+        # carries the number of affected cells, which is the correct
+        # denominator for completeness scoring.
+        missing_affected = sum(
+            int(issue.metadata.get("missing_cells", 0) or 0)
+            for issue in issues
+            if issue.issue_type.lower() == "missing"
+        )
+
         denominators = {
             "missing": max(int(total_cells or total_records), 1),
             "duplicate": max(int(total_records), 1),
@@ -56,7 +66,11 @@ class QualityScore:
 
         category_scores = {}
         for name, weight in self.weights.items():
-            count = int(counts.get(name, 0))
+            count = (
+                missing_affected
+                if name == "missing"
+                else int(counts.get(name, 0))
+            )
             denominator = denominators[name]
             error_rate = min(count / denominator, 1.0)
             category_scores[name] = {
