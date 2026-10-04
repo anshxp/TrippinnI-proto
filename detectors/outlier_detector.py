@@ -111,8 +111,9 @@ class OutlierDetector(BaseDetector):
             model = IsolationForest(
                 n_estimators=100, contamination="auto", random_state=self.RANDOM_STATE, n_jobs=-1
             )
-            labels = model.fit_predict(self._scaled_matrix(numeric))
-            scores = model.decision_function(self._scaled_matrix(numeric))
+            matrix = self._scaled_matrix(numeric)
+            labels = model.fit_predict(matrix)
+            scores = model.decision_function(matrix)
             order = np.argsort(scores)
             flagged = [i for i in order if labels[i] == -1][:self.MAX_ISSUES_PER_METHOD]
             for pos in flagged:
@@ -151,7 +152,7 @@ class OutlierDetector(BaseDetector):
             hidden = max(2, min(16, numeric.shape[1] // 2))
             model = MLPRegressor(
                 hidden_layer_sizes=(hidden,), activation="relu", solver="adam",
-                max_iter=40, random_state=self.RANDOM_STATE, early_stopping=True,
+                max_iter=200, tol=1e-3, n_iter_no_change=15, random_state=self.RANDOM_STATE, early_stopping=True,
             )
             model.fit(matrix, matrix)
             reconstructed = model.predict(matrix)
