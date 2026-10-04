@@ -75,6 +75,8 @@ class ReportVisualizer:
                 "memory_mb": profile.get("memory", {}).get("total_memory_mb", 0.0),
                 "quality_score": q.get("quality_score"),
                 "total_issues": q.get("total_issues", 0),
+                "detection_sample_rows": (q.get("summary") or {}).get("evaluation", {}).get("sample_rows"),
+                "detection_sample_fraction": (q.get("summary") or {}).get("evaluation", {}).get("sample_fraction_of_profile"),
                 "detector_summary": q.get("detector_summary", {}),
                 "severity_summary": q.get("severity_summary", {}),
             })
@@ -82,7 +84,12 @@ class ReportVisualizer:
                 t = column.get("semantic_type") or "unknown"
                 semantic[t] = semantic.get(t, 0) + 1
         return {
-            "report_version": 1,
+            "report_version": 2,
+            "quality_scope": {
+                "profiling_scope": "deterministic first prefix",
+                "detection_scope": "bounded reservoir sample",
+                "interpretation": "issue counts are unique findings; missingness is scored by affected cells",
+            },
             "table_count": len(tables),
             "total_rows_profiled": sum(int(t["rows"] or 0) for t in tables),
             "total_columns": sum(int(t["columns"] or 0) for t in tables),
