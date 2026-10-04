@@ -307,6 +307,7 @@ The knowledge graph represents:
 - candidate primary/foreign-key relationships
 - shared identifier relationship candidates
 - temporal and clinical semantic roles
+- pluggable terminology resolution interface
 
 Detected issues are enriched with graph context so downstream reports can explain why a field is being evaluated in a particular semantic role.
 
