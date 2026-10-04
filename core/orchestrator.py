@@ -17,6 +17,9 @@ from core.memory_utils import downcast_dataframe, release
 from profiling.profiler import DatasetProfilerEngine
 from quality.detector import QualityDetector
 from quality.confidence import ConfidenceAggregator
+from context.semantic_context import SemanticContextBuilder
+from context.knowledge_graph import KnowledgeGraphBuilder
+from context.context_engine import ContextEngine
 
 
 class Orchestrator:
@@ -32,6 +35,8 @@ class Orchestrator:
 
         self.profiles = {}
         self.quality_results = {}
+        self.semantic_context = {}
+        self.knowledge_graph = None
 
         # Persistent table-level checkpoint. A table is marked complete only
         # after profiling AND quality detection finish successfully.
@@ -68,6 +73,8 @@ class Orchestrator:
 
         self.profiles = {}
         self.quality_results = {}
+        self.semantic_context = {}
+        self.knowledge_graph = None
 
         loader = self.loader_manager.get_loader()
         tables = loader.get_tables()
@@ -178,6 +185,9 @@ class Orchestrator:
                         report,
                     )
                     result.issues = self.confidence.aggregate(result.issues)
+                    local_context = SemanticContextBuilder().build({table: report})
+                    local_graph = KnowledgeGraphBuilder().build(local_context)
+                    result.issues = ContextEngine().enrich_issues(result.issues, local_graph)
                     self.quality_results[table] = result
                     self._save_quality_result(table, result)
                     detection_elapsed = time.monotonic() - detection_started
@@ -242,6 +252,9 @@ class Orchestrator:
             )
 
             result.issues = self.confidence.aggregate(result.issues)
+            local_context = SemanticContextBuilder().build({table: self.profiles[table]})
+            local_graph = KnowledgeGraphBuilder().build(local_context)
+            result.issues = ContextEngine().enrich_issues(result.issues, local_graph)
 
             self.quality_results[table] = result
             self._save_quality_result(table, result)
@@ -253,10 +266,51 @@ class Orchestrator:
             completed_tables.add(table)
             print(f"  Checkpoint saved: {table}")
 
+        self._build_context_layer()
+
         print()
         print("=" * 78)
-        print("Dataset profiling and quality detection completed.")
+        print("Dataset profiling, semantic context, and quality detection completed.")
         print("=" * 78)
+
+    def _build_context_layer(self) -> None:
+        """Build and persist the dataset-level semantic/knowledge context."""
+        if not self.profiles:
+            return
+        semantic_builder = SemanticContextBuilder()
+        graph_builder = KnowledgeGraphBuilder()
+        context_engine = ContextEngine()
+
+        self.semantic_context = semantic_builder.build(self.profiles)
+        self.knowledge_graph = graph_builder.build(self.semantic_context)
+        cross_table = context_engine.detect_cross_table_structure(
+            self.semantic_context,
+            self.knowledge_graph,
+        )
+
+        output_dir = config.OUTPUT_ROOT / "reports" / "context"
+        output_dir.mkdir(parents=True, exist_ok=True)
+        payload = {
+            "semantic_context": self.semantic_context,
+            "knowledge_graph": self.knowledge_graph.to_dict(),
+            "cross_table_structure": cross_table.to_dict(),
+            "scope": "dataset_agnostic_healthcare",
+            "note": "Cross-table entries are relationship candidates; value-level referential validation requires synchronized multi-table data.",
+        }
+        path = output_dir / "healthcare_context.json"
+        temporary = path.with_suffix(".tmp")
+        try:
+            with temporary.open("w", encoding="utf-8") as handle:
+                json.dump(payload, handle, indent=2, default=str)
+            temporary.replace(path)
+        except OSError as exc:
+            print(f"  Warning: could not save healthcare context: {exc}")
+
+        print(
+            f"  Healthcare context: {len(self.knowledge_graph.nodes):,} graph nodes | "
+            f"{len(self.knowledge_graph.edges):,} graph edges | "
+            f"{cross_table.issue_count:,} relationship candidates"
+        )
 
     ##################################################################
 
