@@ -29,7 +29,7 @@ _CLINICAL_TOKENS = {
 
 
 def _tokens(name: str) -> set[str]:
-    normalized = re.sub(r"([a-z0-9])([A-Z])", r"\\1_\\2", str(name)).lower()
+    normalized = re.sub(r"([a-z0-9])([A-Z])", r"\1_\2", str(name)).lower()
     return {part for part in re.split(r"[^a-z0-9]+", normalized) if part}
 
 
