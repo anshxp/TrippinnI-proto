@@ -82,6 +82,7 @@ class QualityResult:
             "quality_score": self.quality_score,
             "total_issues": self.total_issues,
             "summary": self.summary,
+            "issues": [issue.to_dict() for issue in self.issues],
             "detectors": [
                 detector.to_dict()
                 for detector in self.detector_results
