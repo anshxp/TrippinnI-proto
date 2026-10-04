@@ -261,9 +261,13 @@ class Orchestrator:
     ##################################################################
 
     def _load_persisted_results(self, tables: set[str]) -> None:
-        """Restore completed table reports when a checkpointed run resumes."""
+        """Restore persisted profile and quality summaries on checkpoint resume."""
         profiling_dir = config.OUTPUT_ROOT / "reports" / "profiling"
         quality_dir = config.OUTPUT_ROOT / "reports" / "quality"
+
+        from models.detector_result import DetectorResult
+        from models.issue import Issue
+        from models.quality_result import QualityResult
 
         for table in tables:
             profile_path = profiling_dir / f"{table}_profile.json"
@@ -275,31 +279,53 @@ class Orchestrator:
                     print(f"  Warning: could not restore profile for {table}: {exc}")
 
             quality_path = quality_dir / f"{table}.json"
-            if quality_path.exists():
-                try:
-                    from models.detector_result import DetectorResult
-                    from models.issue import Issue
-                    from models.quality_result import QualityResult
+            if not quality_path.exists():
+                continue
+            try:
+                with quality_path.open("r", encoding="utf-8") as handle:
+                    payload = json.load(handle)
 
-                    with quality_path.open("r", encoding="utf-8") as handle:
-                        payload = json.load(handle)
-
-                    detectors = [
-                        DetectorResult.from_dict(item)
-                        for item in payload.get("detectors", [])
-                    ]
-                    issues = [
-                        Issue.from_dict(item)
-                        for item in payload.get("issues", [])
-                    ]
-                    self.quality_results[table] = QualityResult(
-                        detector_results=detectors,
-                        issues=issues,
-                        quality_score=float(payload.get("quality_score", 0.0)),
-                        summary=payload.get("summary", {}),
+                restored_issues = [
+                    Issue(
+                        table=item.get("table", table),
+                        row_index=int(item.get("row_index", 0)),
+                        column=item.get("column"),
+                        issue_type=item.get("issue_type", "unknown"),
+                        severity=item.get("severity", "LOW"),
+                        detector=item.get("detector", "unknown"),
+                        original_value=item.get("original_value"),
+                        expected_value=item.get("expected_value"),
+                        confidence=float(item.get("confidence", 1.0)),
+                        metadata=item.get("metadata") or {},
                     )
-                except (OSError, ValueError, TypeError, KeyError, AttributeError) as exc:
-                    print(f"  Warning: could not restore quality result for {table}: {exc}")
+                    for item in payload.get("issues", [])
+                ]
+
+                restored_detectors = []
+                for item in payload.get("detectors", []):
+                    detector_issues = [
+                        issue for issue in restored_issues
+                        if issue.detector == item.get("detector")
+                    ]
+                    restored_detectors.append(
+                        DetectorResult(
+                            detector_name=item.get("detector", "unknown"),
+                            issues=detector_issues,
+                            statistics=item.get("statistics") or {},
+                            execution_time=float(item.get("execution_time", 0.0)),
+                            success=bool(item.get("success", True)),
+                            error=item.get("error"),
+                        )
+                    )
+
+                self.quality_results[table] = QualityResult(
+                    detector_results=restored_detectors,
+                    issues=restored_issues,
+                    quality_score=float(payload.get("quality_score", 0.0)),
+                    summary=payload.get("summary") or {},
+                )
+            except (OSError, ValueError, TypeError, KeyError) as exc:
+                print(f"  Warning: could not restore quality result for {table}: {exc}")
 
     ##################################################################
 
