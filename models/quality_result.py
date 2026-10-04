@@ -42,9 +42,34 @@ class QualityResult:
         """
 
         issues: List[Issue] = []
+        by_fingerprint: Dict[tuple, Issue] = {}
+        severity_rank = {"LOW": 1, "MEDIUM": 2, "HIGH": 3, "CRITICAL": 4}
 
         for result in detector_results:
-            issues.extend(result.issues)
+            for issue in result.issues:
+                fingerprint = (
+                    issue.table,
+                    issue.row_index,
+                    issue.column,
+                    issue.issue_type,
+                )
+                existing = by_fingerprint.get(fingerprint)
+                if existing is None:
+                    by_fingerprint[fingerprint] = issue
+                    issues.append(issue)
+                    continue
+
+                # Multiple detectors can independently describe the same
+                # defect (for example a missing required field). Keep one
+                # canonical finding while preserving detector provenance.
+                sources = set(existing.metadata.get("source_detectors", []))
+                sources.add(existing.detector)
+                sources.add(issue.detector)
+                existing.metadata["source_detectors"] = sorted(sources)
+
+                if severity_rank.get(issue.severity, 0) > severity_rank.get(existing.severity, 0):
+                    existing.severity = issue.severity
+                existing.confidence = max(existing.confidence, issue.confidence)
 
         return cls(
             detector_results=detector_results,
