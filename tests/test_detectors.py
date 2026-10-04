@@ -39,6 +39,10 @@ def test_missing_duplicate_and_datatype_detectors():
     datatype = DatatypeDetector().detect({"demo": df}, profile)
 
     assert missing.issue_count == 1
+    missing_issue = missing.issues[0]
+    assert missing_issue.row_index == -1
+    assert missing_issue.metadata["missing_cells"] == 1
+    assert missing_issue.metadata["aggregation"] == "column"
     assert duplicate.issue_count == 2
     assert datatype.issue_count == 0
 
@@ -65,6 +69,39 @@ def test_mimic_rule_validator_flags_temporal_and_hierarchy_errors():
 
     assert "temporal" in issue_types
     assert "conformance" in issue_types
+
+
+def test_quality_result_deduplicates_same_finding_across_detectors():
+    from models.detector_result import DetectorResult
+    from models.issue import Issue
+    from models.quality_result import QualityResult
+
+    issue_a = Issue(
+        table="demo", row_index=4, column="subject_id",
+        issue_type="missing", severity="MEDIUM", detector="MissingDetector",
+    )
+    issue_b = Issue(
+        table="demo", row_index=4, column="subject_id",
+        issue_type="missing", severity="HIGH", detector="RuleValidator",
+    )
+    result = QualityResult.from_detector_results([
+        DetectorResult(detector_name="MissingDetector", issues=[issue_a]),
+        DetectorResult(detector_name="RuleValidator", issues=[issue_b]),
+    ])
+
+    assert result.total_issues == 1
+    assert result.issues[0].severity == "HIGH"
+    assert result.issues[0].metadata["source_detectors"] == [
+        "MissingDetector", "RuleValidator"
+    ]
+
+
+def test_quality_detector_scores_missingness_by_affected_cells():
+    df = pd.DataFrame({"value": [1.0, None, None, 4.0]})
+    result = QualityDetector().run({"demo": df}, _profile(df))
+
+    assert result.summary["category_scores"]["missing"]["count"] == 2
+    assert result.summary["category_scores"]["missing"]["denominator"] == 4
 
 
 def test_quality_detector_produces_bounded_score():
