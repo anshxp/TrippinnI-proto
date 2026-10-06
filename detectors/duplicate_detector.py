@@ -181,8 +181,8 @@ class DuplicateDetector(BaseDetector):
                     key_duplicates += 1
 
             fuzzy_count = 0
+            fuzzy_columns = self._text_columns(df, profile) if config.FUZZY_DUPLICATE_ENABLED else []
             if config.FUZZY_DUPLICATE_ENABLED:
-                fuzzy_columns = self._text_columns(df, profile)
                 for column, row_a, row_b, score, value_a, value_b in self._fuzzy_matches(
                     df, fuzzy_columns
                 ):
@@ -213,7 +213,7 @@ class DuplicateDetector(BaseDetector):
                         "matched_row_index": row_a,
                         "matched_value": value_a,
                         "similarity_score": round(score, 2),
-                        "threshold": threshold,
+                        "threshold": float(config.FUZZY_DUPLICATE_THRESHOLD),
                     }
                     result.add_issue(Issue(
                         table=table_name,
@@ -234,11 +234,8 @@ class DuplicateDetector(BaseDetector):
                 "candidate_key_duplicates": int(key_duplicates),
                 "fuzzy_duplicates": int(fuzzy_count),
                 "semantic_duplicates": 0,
-                "fuzzy_columns_checked": (
-                    self._text_columns(df, profile)
-                    if config.FUZZY_DUPLICATE_ENABLED
-                    else []
-                ),
+                "fuzzy_columns_checked": fuzzy_columns,
+                "fuzzy_threshold": float(config.FUZZY_DUPLICATE_THRESHOLD),
             }
 
         return result
