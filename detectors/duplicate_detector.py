@@ -193,7 +193,7 @@ class DuplicateDetector(BaseDetector):
                         "matched_row_index": row_b,
                         "matched_value": value_b,
                         "similarity_score": round(score, 2),
-                        "threshold": threshold,
+                        "threshold": float(config.FUZZY_DUPLICATE_THRESHOLD),
                     }
                     result.add_issue(Issue(
                         table=table_name,
