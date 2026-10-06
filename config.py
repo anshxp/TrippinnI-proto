@@ -32,6 +32,8 @@ DETECTION_SAMPLE_SEED = 42
 # Fuzzy matching is intentionally limited to text-like, non-identifier columns.
 FUZZY_DUPLICATE_ENABLED = True
 FUZZY_DUPLICATE_THRESHOLD = 92.0
+# Ignore very short strings because edit similarity is unstable for short text.
+FUZZY_DUPLICATE_MIN_LENGTH = 4
 FUZZY_DUPLICATE_MAX_VALUES_PER_COLUMN = 5_000
 FUZZY_DUPLICATE_MAX_MATCHES_PER_VALUE = 3
 
