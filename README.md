@@ -15,8 +15,8 @@ The framework combines healthcare-aware profiling, semantic context inference, a
 - Duplicate detection
   - Exact matching
   - Composite key matching
-  - Fuzzy matching (RapidFuzz)
-  - Semantic matching (Sentence-BERT)
+  - Fuzzy text matching (RapidFuzz) with configurable similarity threshold
+  - Semantic matching (Sentence-BERT) — planned, not currently implemented
 - Datatype validation
 - Outlier detection
   - Robust IQR rules
@@ -179,12 +179,14 @@ The outlier detection module combines deterministic and machine learning approac
 
 # Duplicate Detection
 
-Duplicate detection is performed using multiple strategies.
+Duplicate detection currently separates confirmed structural duplicates from approximate text similarity.
 
-- Exact Matching
-- Composite Keys
-- RapidFuzz
-- Sentence-BERT
+- Exact row matching — confirmed duplicate records when every field matches
+- Candidate-key uniqueness checks — repeated values in profiler-identified candidate keys
+- Fuzzy text matching with RapidFuzz — probable duplicates based on configurable string similarity
+- Sentence-BERT semantic matching — planned; not currently implemented
+
+RapidFuzz matching excludes identifier columns, ignores very short strings, operates on unique normalized text values, and records the similarity score and threshold in each issue. Fuzzy findings are MEDIUM severity and should be reviewed rather than automatically deleted.
 
 ---
 
