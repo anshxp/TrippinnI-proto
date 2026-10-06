@@ -28,6 +28,13 @@ CSV_ROW_COUNT_FALLBACK_MAX_MB = 10
 MAX_ROWS_FOR_DETECTION = 10_000
 DETECTION_SAMPLE_SEED = 42
 
+# Approximate duplicate detection (RapidFuzz)
+# Fuzzy matching is intentionally limited to text-like, non-identifier columns.
+FUZZY_DUPLICATE_ENABLED = True
+FUZZY_DUPLICATE_THRESHOLD = 92.0
+FUZZY_DUPLICATE_MAX_VALUES_PER_COLUMN = 5_000
+FUZZY_DUPLICATE_MAX_MATCHES_PER_VALUE = 3
+
 
 # Official MIMIC-IV v3.1 row counts used to turn the 10% prefix into an
 # exact row boundary without scanning the source file first.
