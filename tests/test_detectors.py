@@ -165,3 +165,55 @@ def test_constraints_are_ml_inferred_without_table_specific_ranges():
     assert numeric["model"] == "IsolationForest"
     assert numeric["lower"] <= 10.0
     assert numeric["upper"] >= 19.5
+
+
+def test_duplicate_detector_fuzzy_matches_similar_text():
+    df = pd.DataFrame({
+        "description": [
+            "acute kidney injury",
+            "acute kidney injuri",
+            "pneumonia",
+        ],
+        "value": [1, 1, 2],
+    })
+    profile = {
+        "columns": {
+            "description": {"semantic_type": "text"},
+            "value": {"semantic_type": "numeric"},
+        },
+        "keys": {"primary_keys": []},
+    }
+
+    result = DuplicateDetector().detect({"demo": df}, profile)
+
+    fuzzy = [
+        issue for issue in result.issues
+        if issue.metadata.get("method") == "fuzzy_match"
+    ]
+    assert len(fuzzy) == 2
+    assert {issue.row_index for issue in fuzzy} == {0, 1}
+    assert all(issue.severity == "MEDIUM" for issue in fuzzy)
+    assert all(issue.confidence >= 0.92 for issue in fuzzy)
+    assert all(issue.metadata["similarity_score"] >= 92.0 for issue in fuzzy)
+
+
+def test_duplicate_detector_does_not_fuzzy_match_identifiers():
+    df = pd.DataFrame({
+        "subject_id": ["10001", "10002"],
+        "note": ["patient record", "patient record"],
+    })
+    profile = {
+        "columns": {
+            "subject_id": {"semantic_type": "identifier"},
+            "note": {"semantic_type": "text"},
+        },
+        "keys": {"primary_keys": []},
+    }
+
+    result = DuplicateDetector().detect({"demo": df}, profile)
+
+    fuzzy = [
+        issue for issue in result.issues
+        if issue.metadata.get("method") == "fuzzy_match"
+    ]
+    assert all(issue.column != "subject_id" for issue in fuzzy)
