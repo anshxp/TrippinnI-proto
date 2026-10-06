@@ -80,6 +80,7 @@ class DuplicateDetector(BaseDetector):
         max_values = max(1, int(config.FUZZY_DUPLICATE_MAX_VALUES_PER_COLUMN))
         max_matches = max(1, int(config.FUZZY_DUPLICATE_MAX_MATCHES_PER_VALUE))
         threshold = float(config.FUZZY_DUPLICATE_THRESHOLD)
+        min_length = max(1, int(config.FUZZY_DUPLICATE_MIN_LENGTH))
 
         for column in columns:
             series = df[column]
@@ -89,7 +90,7 @@ class DuplicateDetector(BaseDetector):
             # out of the fuzzy path and bounds the matching workload.
             value_to_indices: dict[str, list[int]] = {}
             for index, value in normalized.items():
-                if not value:
+                if not value or len(value) < min_length:
                     continue
                 value_to_indices.setdefault(value, []).append(int(index))
 
