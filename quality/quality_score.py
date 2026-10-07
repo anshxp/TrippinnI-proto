@@ -58,6 +58,14 @@ class QualityScore:
             for issue in issues
             if issue.issue_type.lower() == "missing"
         )
+        referential_affected = sum(
+            max(
+                int(issue.metadata.get("orphan_rows", 0) or 0),
+                int(issue.metadata.get("duplicate_parent_keys", 0) or 0),
+            )
+            for issue in issues
+            if issue.issue_type.lower() == "referential"
+        )
 
         denominators = {
             "missing": max(int(total_cells or total_records), 1),
@@ -83,6 +91,8 @@ class QualityScore:
             count = (
                 missing_affected
                 if name == "missing"
+                else referential_affected
+                if name == "referential"
                 else int(counts.get(name, 0))
             )
             denominator = denominators[name]
