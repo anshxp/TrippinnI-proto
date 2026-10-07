@@ -41,6 +41,24 @@ class QualityDetector:
                 )
             results.append(result)
 
+        if reference_dataset is not None:
+            advanced = next(
+                (detector for detector in self.detectors
+                 if detector.__class__.__name__ == "AdvancedQualityDetector"),
+                None,
+            )
+            if advanced is not None:
+                try:
+                    results.append(
+                        advanced.detect_distribution_shift(dataset, reference_dataset)
+                    )
+                except Exception as exc:
+                    results.append(DetectorResult(
+                        detector_name="AdvancedQualityDetector.DistributionShift",
+                        success=False,
+                        error=str(exc),
+                    ))
+
         quality = QualityResult.from_detector_results(results)
         if isinstance(dataset, dict):
             total_records = sum(len(df) for df in dataset.values() if hasattr(df, "__len__"))
