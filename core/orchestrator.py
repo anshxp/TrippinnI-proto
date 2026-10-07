@@ -20,6 +20,7 @@ from quality.confidence import ConfidenceAggregator
 from context.semantic_context import SemanticContextBuilder
 from context.knowledge_graph import KnowledgeGraphBuilder
 from context.context_engine import ContextEngine
+from detectors.cross_table_integrity_detector import CrossTableIntegrityDetector
 
 
 class Orchestrator:
@@ -37,6 +38,7 @@ class Orchestrator:
         self.quality_results = {}
         self.semantic_context = {}
         self.knowledge_graph = None
+        self.detection_samples = {}
 
         # Persistent table-level checkpoint. A table is marked complete only
         # after profiling AND quality detection finish successfully.
@@ -48,7 +50,7 @@ class Orchestrator:
         # so you can watch RSS stay bounded across a real 10GB run
         # instead of taking it on faith.
         self._process = psutil.Process()
-        self._checkpoint_version = 3
+        self._checkpoint_version = 4
 
     ##################################################################
 
@@ -75,6 +77,7 @@ class Orchestrator:
         self.quality_results = {}
         self.semantic_context = {}
         self.knowledge_graph = None
+        self.detection_samples = {}
 
         loader = self.loader_manager.get_loader()
         tables = loader.get_tables()
@@ -180,6 +183,7 @@ class Orchestrator:
                     sample = downcast_dataframe(sample)
 
                     detection_started = time.monotonic()
+                    self.detection_samples[table] = sample.copy()
                     result = self.quality_detector.run(
                         {table: sample},
                         report,
@@ -246,6 +250,7 @@ class Orchestrator:
                 f"  Stage: quality detection | "
                 f"sample rows: {len(detection_frame):,}"
             )
+            self.detection_samples[table] = detection_frame.copy()
             result = self.quality_detector.run(
                 {table: detection_frame},
                 self.profiles[table],
@@ -288,14 +293,68 @@ class Orchestrator:
             self.knowledge_graph,
         )
 
+        integrity_detector = CrossTableIntegrityDetector()
+        cross_table_integrity = integrity_detector.detect(
+            self.detection_samples,
+            self.knowledge_graph,
+        )
+
+        for issue in cross_table_integrity.issues:
+            table_result = self.quality_results.get(issue.table)
+            if table_result is None:
+                continue
+            table_result.issues.append(issue)
+            from models.detector_result import DetectorResult
+            table_result.detector_results.append(
+                DetectorResult(
+                    detector_name=integrity_detector.name,
+                    issues=[issue],
+                    statistics={},
+                )
+            )
+            profile = self.profiles.get(issue.table, {})
+            sample = self.detection_samples.get(issue.table)
+            sample_rows = len(sample) if sample is not None else int(
+                table_result.summary.get("evaluation", {}).get("sample_rows", 0)
+            )
+            sample_cells = (
+                int(sample.size)
+                if sample is not None
+                else sample_rows * max(len(profile.get("columns", {})), 1)
+            )
+            rescored = self.quality_detector.scorer.calculate(
+                table_result.issues,
+                total_records=sample_rows,
+                total_cells=sample_cells,
+            )
+            table_result.quality_score = rescored["overall_score"]
+            table_result.summary = rescored
+            if sample_rows:
+                table_result.summary["evaluation"] = {
+                    "sample_rows": sample_rows,
+                    "profile_rows": int(
+                        profile.get("dataset", {}).get("rows", sample_rows)
+                    ),
+                    "sample_fraction_of_profile": round(
+                        sample_rows / max(
+                            int(profile.get("dataset", {}).get("rows", sample_rows)),
+                            1,
+                        ),
+                        6,
+                    ),
+                    "scope": "bounded detection sample; profiling may cover a larger prefix",
+                }
+            self._save_quality_result(issue.table, table_result)
+
         output_dir = config.OUTPUT_ROOT / "reports" / "context"
         output_dir.mkdir(parents=True, exist_ok=True)
         payload = {
             "semantic_context": self.semantic_context,
             "knowledge_graph": self.knowledge_graph.to_dict(),
             "cross_table_structure": cross_table.to_dict(),
+            "cross_table_integrity": cross_table_integrity.to_dict(),
             "scope": "dataset_agnostic_healthcare",
-            "note": "Cross-table entries are relationship candidates; value-level referential validation requires synchronized multi-table data.",
+            "note": "Cross-table integrity is validated against bounded synchronized detection samples. Findings quantify observed orphan values and parent-key uniqueness within that validation scope; they are not full-table guarantees.",
         }
         path = output_dir / "healthcare_context.json"
         temporary = path.with_suffix(".tmp")
@@ -309,7 +368,8 @@ class Orchestrator:
         print(
             f"  Healthcare context: {len(self.knowledge_graph.nodes):,} graph nodes | "
             f"{len(self.knowledge_graph.edges):,} graph edges | "
-            f"{cross_table.issue_count:,} relationship candidates"
+            f"{cross_table.issue_count:,} relationship candidates | "
+            f"{cross_table_integrity.issue_count:,} referential findings"
         )
 
     ##################################################################
