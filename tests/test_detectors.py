@@ -221,10 +221,10 @@ def test_duplicate_detector_does_not_fuzzy_match_identifiers():
 def test_advanced_quality_detects_representation_and_fairness():
     from detectors.advanced_quality_detector import AdvancedQualityDetector
 
-    rows = 100
+    rows = 1000
     df = pd.DataFrame({
-        "gender": ["A"] * 90 + ["B"] * 10,
-        "lab_value": list(range(90)) + [None] * 10,
+        "gender": ["A"] * 960 + ["B"] * 40,
+        "lab_value": list(range(960)) + [None] * 40,
     })
     result = AdvancedQualityDetector().detect({"demo": df}, _profile(df))
 
