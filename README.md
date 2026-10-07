@@ -43,6 +43,13 @@ The framework combines healthcare-aware profiling, semantic context inference, a
 - Overall data quality scoring
 - AI-generated explanations using Hugging Face LLMs
 - Comprehensive quality reporting
+- Advanced EHR quality assessment
+  - Bias / representativeness profiling
+  - Group-wise data fairness checks
+  - Interoperability/conformance signals for semantic aliases and mixed units
+  - Temporal data-drift detection
+  - Explicit reference-vs-current distribution-shift detection
+  - Bootstrap robustness/sensitivity assessment
 
 ---
 
@@ -318,3 +325,28 @@ Cross-table analysis currently reports structural relationship candidates. It do
 The generated context artifact is written to outputs/reports/context/healthcare_context.json.
 
 MIMIC-IV remains a validation dataset, not the product's schema contract. Future terminology adapters can map inferred clinical concepts to standards such as FHIR, OMOP, SNOMED CT, LOINC, RxNorm, CPT/HCPCS, or UCUM without making those standards mandatory for every dataset.
+
+
+## Advanced EHR quality dimensions
+
+The prototype now includes an AdvancedQualityDetector. It reports observable data-quality signals with explicit thresholds and metadata rather than asking an LLM to infer protected-group fairness or clinical truth.
+
+### Bias / representativeness
+Candidate demographic columns are identified conservatively from observed field names. Groups meeting the minimum sample-size threshold but falling below the configured representation threshold are flagged. This is a representation warning, not a claim that the population itself should be balanced.
+
+### Fairness
+Group-wise missingness is compared for candidate demographic attributes. A configured missingness-rate gap threshold produces a fairness warning. This currently measures data-quality disparity, not downstream model fairness.
+
+### Interoperability / conformance
+The detector identifies known semantic aliases, such as heart_rate, pulse, and hr, and detects mixed units in unit/UOM columns. These are normalization signals; they are not a complete FHIR/OMOP terminology validator.
+
+### Data drift
+When a usable time field exists, observations are split chronologically and numeric distributions are compared using standardized quantile distance; categorical distributions use total variation distance. Without a usable time field, row-order splitting is used and explicitly recorded in result metadata.
+
+### Distribution shift
+Deployment/reference comparison is available through QualityDetector.run(dataset, profile, reference_dataset=...). Numeric columns use standardized quantile distance and categorical columns use total variation distance. This requires an explicit reference dataset; the prototype does not pretend that a single dataset is a training/deployment comparison.
+
+### Robustness
+The detector performs deterministic bootstrap resampling of the evaluated sample and measures sensitivity of the overall missingness rate. The result reports bootstrap mean, standard deviation, and range. This is a data-quality stability signal, not a full causal or model-performance robustness analysis.
+
+All thresholds are configurable in config.py. These dimensions are evaluated on the bounded detection sample when the normal MIMIC-IV pipeline is used; they should therefore be interpreted as sample-level evidence rather than exact full-table population estimates.
