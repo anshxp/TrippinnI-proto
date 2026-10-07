@@ -26,6 +26,11 @@ class QualityScore:
         "temporal": 0.05,
         "plausibility": 0.05,
         "referential": 0.05,
+        "bias": 0.03,
+        "fairness": 0.03,
+        "interoperability": 0.03,
+        "drift": 0.03,
+        "robustness": 0.03,
     }
 
     def __init__(self, **weights: float) -> None:
@@ -62,6 +67,11 @@ class QualityScore:
             "temporal": max(int(total_records), 1),
             "plausibility": max(int(total_records), 1),
             "referential": max(int(total_records), 1),
+            "bias": max(int(total_records), 1),
+            "fairness": max(int(total_records), 1),
+            "interoperability": max(int(total_records), 1),
+            "drift": max(int(total_records), 1),
+            "robustness": max(int(total_records), 1),
         }
 
         category_scores = {}
