@@ -217,3 +217,62 @@ def test_duplicate_detector_does_not_fuzzy_match_identifiers():
         if issue.metadata.get("method") == "fuzzy_match"
     ]
     assert all(issue.column != "subject_id" for issue in fuzzy)
+
+def test_advanced_quality_detects_representation_and_fairness():
+    from detectors.advanced_quality_detector import AdvancedQualityDetector
+
+    rows = 100
+    df = pd.DataFrame({
+        "gender": ["A"] * 90 + ["B"] * 10,
+        "lab_value": list(range(90)) + [None] * 10,
+    })
+    result = AdvancedQualityDetector().detect({"demo": df}, _profile(df))
+
+    assert any(issue.issue_type == "bias" for issue in result.issues)
+    assert any(issue.issue_type == "fairness" for issue in result.issues)
+
+
+def test_advanced_quality_detects_interoperability_and_drift():
+    from detectors.advanced_quality_detector import AdvancedQualityDetector
+
+    rows = 100
+    dates = pd.date_range("2024-01-01", periods=rows, freq="D")
+    df = pd.DataFrame({
+        "charttime": dates,
+        "heart_rate": [70] * 50 + [150] * 50,
+        "pulse": [70] * 100,
+        "valueuom": ["mg/dL"] * 50 + ["mmol/L"] * 50,
+    })
+    result = AdvancedQualityDetector().detect({"demo": df}, _profile(df))
+
+    types = {issue.issue_type for issue in result.issues}
+    assert "interoperability" in types
+    assert "drift" in types
+
+
+def test_distribution_shift_requires_explicit_reference_dataset():
+    from detectors.advanced_quality_detector import AdvancedQualityDetector
+
+    reference = pd.DataFrame({"value": [1.0] * 50 + [2.0] * 50})
+    current = pd.DataFrame({"value": [100.0] * 50 + [101.0] * 50})
+
+    result = AdvancedQualityDetector().detect_distribution_shift(
+        {"demo": current},
+        {"demo": reference},
+    )
+
+    assert any(issue.issue_type == "distribution_shift" for issue in result.issues)
+    assert result.statistics["demo"]["reference_rows"] == 100
+
+
+def test_advanced_quality_robustness_metric_is_reported():
+    from detectors.advanced_quality_detector import AdvancedQualityDetector
+
+    df = pd.DataFrame({
+        "value": list(range(100)),
+        "other": [None] * 20 + list(range(80)),
+    })
+    result = AdvancedQualityDetector().detect({"demo": df}, _profile(df))
+
+    assert result.statistics["demo"]["robustness"]["available"] is True
+    assert "missingness_range" in result.statistics["demo"]["robustness"]
