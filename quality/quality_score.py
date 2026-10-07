@@ -68,12 +68,14 @@ class QualityScore:
             "temporal": max(int(total_records), 1),
             "plausibility": max(int(total_records), 1),
             "referential": max(int(total_records), 1),
-            "bias": max(int(total_records), 1),
-            "fairness": max(int(total_records), 1),
-            "interoperability": max(int(total_records), 1),
-            "drift": max(int(total_records), 1),
-            "distribution_shift": max(int(total_records), 1),
-            "robustness": max(int(total_records), 1),
+            # These are dataset-level assessment dimensions: one detected
+            # warning should not disappear merely because the table is large.
+            "bias": 1,
+            "fairness": 1,
+            "interoperability": 1,
+            "drift": 1,
+            "distribution_shift": 1,
+            "robustness": 1,
         }
 
         category_scores = {}
