@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any, Dict, Iterable
+from typing import Any, Dict
 
 import pandas as pd
 
@@ -108,7 +108,10 @@ class CrossTableIntegrityDetector:
         return result
 
     @staticmethod
-    def _relationship_candidates(\n        graph: Any,\n        datasets: Dict[str, pd.DataFrame],\n    ) -> list[tuple[str, str, str, str, float]]:
+    def _relationship_candidates(
+        graph: Any,
+        datasets: Dict[str, pd.DataFrame],
+    ) -> list[tuple[str, str, str, str, float]]:
         """Return one directed FK -> PK candidate per shared identifier pair."""
         candidates: list[tuple[str, str, str, str, float]] = []
         seen: set[tuple[str, str, str, str]] = set()
