@@ -26,7 +26,7 @@ class CrossTableIntegrityDetector:
         graph: Any,
     ) -> DetectorResult:
         result = DetectorResult(detector_name=self.name)
-        relationships = self._relationship_candidates(graph)
+        relationships = self._relationship_candidates(graph, datasets)
 
         validated = 0
         skipped = 0
@@ -108,7 +108,7 @@ class CrossTableIntegrityDetector:
         return result
 
     @staticmethod
-    def _relationship_candidates(graph: Any) -> list[tuple[str, str, str, str, float]]:
+    def _relationship_candidates(\n        graph: Any,\n        datasets: Dict[str, pd.DataFrame],\n    ) -> list[tuple[str, str, str, str, float]]:
         """Return one directed FK -> PK candidate per shared identifier pair."""
         candidates: list[tuple[str, str, str, str, float]] = []
         seen: set[tuple[str, str, str, str]] = set()
@@ -139,11 +139,22 @@ class CrossTableIntegrityDetector:
                 child_table, child_column = target_table, target_column
                 parent_table, parent_column = source_table, source_column
             else:
-                # Ambiguous shared identifiers are retained, but the direction
-                # is deterministic. The validator will use observed uniqueness
-                # to decide whether the proposed parent is plausible.
-                child_table, child_column = source_table, source_column
-                parent_table, parent_column = target_table, target_column
+                # If the graph cannot establish the direction, prefer the
+                # observed one-to-many shape: the more unique column is the
+                # parent candidate. If the samples are unavailable or tied,
+                # keep the graph's deterministic direction.
+                source_score = CrossTableIntegrityDetector._uniqueness_score(
+                    datasets.get(source_table), source_column
+                )
+                target_score = CrossTableIntegrityDetector._uniqueness_score(
+                    datasets.get(target_table), target_column
+                )
+                if target_score > source_score:
+                    child_table, child_column = source_table, source_column
+                    parent_table, parent_column = target_table, target_column
+                else:
+                    child_table, child_column = target_table, target_column
+                    parent_table, parent_column = source_table, source_column
 
             key = (child_table, child_column, parent_table, parent_column)
             reverse = (parent_table, parent_column, child_table, child_column)
@@ -168,6 +179,18 @@ class CrossTableIntegrityDetector:
             for edge in getattr(graph, "edges", [])
             if edge.source == column_node
         )
+
+    @staticmethod
+    def _uniqueness_score(
+        dataframe: pd.DataFrame | None,
+        column: str,
+    ) -> float:
+        if dataframe is None or column not in dataframe.columns:
+            return 0.0
+        values = CrossTableIntegrityDetector._canonical_values(dataframe[column])
+        if values.empty:
+            return 0.0
+        return float(values.nunique(dropna=True) / len(values))
 
     @staticmethod
     def _validate_relationship(
