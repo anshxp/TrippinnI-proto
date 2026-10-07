@@ -139,6 +139,51 @@ class AdvancedQualityDetector(BaseDetector):
         result.statistics["issues"] = result.issue_count
         return result
 
+    def detect_distribution_shift(self, dataset: Any, reference_dataset: Any) -> DetectorResult:
+        """Compare current data with an explicitly supplied reference dataset."""
+        result = DetectorResult(detector_name=self.name + ".DistributionShift")
+        current = dataset if isinstance(dataset, dict) else {"dataset": dataset}
+        reference = reference_dataset if isinstance(reference_dataset, dict) else {"dataset": reference_dataset}
+        for table, current_df in current.items():
+            ref_df = reference.get(table)
+            if not isinstance(current_df, pd.DataFrame) or not isinstance(ref_df, pd.DataFrame):
+                continue
+            common = [c for c in current_df.columns if c in ref_df.columns]
+            metrics = {}
+            for col in common:
+                if pd.api.types.is_numeric_dtype(current_df[col]) and pd.api.types.is_numeric_dtype(ref_df[col]):
+                    metrics[col] = self._numeric_metric(current_df[col], ref_df[col])
+                else:
+                    metrics[col] = self._categorical_metric(current_df[col], ref_df[col])
+            if not metrics:
+                continue
+            column = max(metrics, key=metrics.get)
+            score = float(metrics[column])
+            result.statistics[table] = {
+                "reference_rows": len(ref_df),
+                "current_rows": len(current_df),
+                "max_shift": round(score, 6),
+                "top_columns": dict(sorted(metrics.items(), key=lambda x: x[1], reverse=True)[:10]),
+            }
+            if score >= self.SHIFT_THRESHOLD:
+                result.issues.append(Issue(
+                    table=table, row_index=-1, column=column,
+                    issue_type="distribution_shift", severity="MEDIUM", detector=result.detector_name,
+                    original_value=round(score, 6),
+                    expected_value=f"Reference/current divergence < {self.SHIFT_THRESHOLD}",
+                    confidence=min(0.99, 0.65 + min(score, 0.34)),
+                    metadata={
+                        "dimension": "distribution_shift",
+                        "rule": "reference_distribution_divergence",
+                        "divergence": round(score, 6),
+                        "metric": "quantile_standardized_distance" if pd.api.types.is_numeric_dtype(current_df[column]) else "total_variation_distance",
+                        "reference_rows": len(ref_df),
+                        "current_rows": len(current_df),
+                    },
+                ))
+        result.statistics["issues"] = result.issue_count
+        return result
+
     def _representation(self, table: str, df: pd.DataFrame) -> list[Issue]:
         issues = []
         n = len(df)
