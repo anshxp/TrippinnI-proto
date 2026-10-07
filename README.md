@@ -320,7 +320,7 @@ The knowledge graph represents:
 
 Detected issues are enriched with graph context so downstream reports can explain why a field is being evaluated in a particular semantic role.
 
-Cross-table analysis currently reports structural relationship candidates. It does not claim value-level referential integrity without synchronized multi-table data. That distinction is intentional and keeps the prototype honest across arbitrary healthcare datasets.
+Cross-table analysis now has two layers: structural relationship discovery and value-level referential-integrity validation. Candidate FK -> PK relationships are validated against the bounded synchronized detection samples, reporting orphan child rows/unique values, missing parent records, parent-key uniqueness, referential coverage, and FK -> PK validity. These findings are explicitly sample-scoped; they are not full-table guarantees.
 
 The generated context artifact is written to outputs/reports/context/healthcare_context.json.
 
