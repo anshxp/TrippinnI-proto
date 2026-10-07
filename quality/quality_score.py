@@ -30,6 +30,7 @@ class QualityScore:
         "fairness": 0.03,
         "interoperability": 0.03,
         "drift": 0.03,
+        "distribution_shift": 0.03,
         "robustness": 0.03,
     }
 
@@ -71,6 +72,7 @@ class QualityScore:
             "fairness": max(int(total_records), 1),
             "interoperability": max(int(total_records), 1),
             "drift": max(int(total_records), 1),
+            "distribution_shift": max(int(total_records), 1),
             "robustness": max(int(total_records), 1),
         }
 
