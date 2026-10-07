@@ -11,6 +11,8 @@ import re
 import numpy as np
 import pandas as pd
 
+import config
+
 from detectors.base_detector import BaseDetector
 from models.detector_result import DetectorResult
 from models.issue import Issue
@@ -20,13 +22,13 @@ class AdvancedQualityDetector(BaseDetector):
     """Detect higher-order EHR quality risks from observed data distributions."""
 
     MAX_ISSUES = 20
-    MIN_GROUP_SIZE = 30
+    MIN_GROUP_SIZE = config.MIN_GROUP_SIZE_FOR_BIAS
     MIN_GROUP_SHARE = 0.01
-    REPRESENTATION_THRESHOLD = 0.05
-    FAIRNESS_GAP_THRESHOLD = 0.10
-    DRIFT_THRESHOLD = 0.20
-    SHIFT_THRESHOLD = 0.20
-    ROBUSTNESS_RANGE_THRESHOLD = 0.20
+    REPRESENTATION_THRESHOLD = config.REPRESENTATION_THRESHOLD
+    FAIRNESS_GAP_THRESHOLD = config.FAIRNESS_MISSINGNESS_GAP
+    DRIFT_THRESHOLD = config.DISTRIBUTION_DRIFT_THRESHOLD
+    SHIFT_THRESHOLD = config.DISTRIBUTION_SHIFT_THRESHOLD
+    ROBUSTNESS_RANGE_THRESHOLD = config.ROBUSTNESS_BOOTSTRAP_RANGE
 
     DEMOGRAPHIC_PATTERNS = (
         "sex", "gender", "race", "ethnicity", "language", "payer",
