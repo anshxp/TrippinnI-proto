@@ -346,6 +346,10 @@ class Orchestrator:
                 }
             self._save_quality_result(issue.table, table_result)
 
+        # Cross-table validation no longer needs the bounded samples after the
+        # dataset-level report has been produced.
+        self.detection_samples = {}
+
         output_dir = config.OUTPUT_ROOT / "reports" / "context"
         output_dir.mkdir(parents=True, exist_ok=True)
         payload = {
