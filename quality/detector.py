@@ -8,6 +8,7 @@ from detectors.datatype_detector import DatatypeDetector
 from detectors.duplicate_detector import DuplicateDetector
 from detectors.missing_detector import MissingDetector
 from detectors.outlier_detector import OutlierDetector
+from detectors.advanced_quality_detector import AdvancedQualityDetector
 from models.detector_result import DetectorResult
 from models.quality_result import QualityResult
 from quality.quality_score import QualityScore
@@ -24,10 +25,11 @@ class QualityDetector:
             DatatypeDetector(),
             RuleValidator(),
             OutlierDetector(),
+            AdvancedQualityDetector(),
         ]
         self.scorer = QualityScore()
 
-    def run(self, dataset: Any, profile: Any) -> QualityResult:
+    def run(self, dataset: Any, profile: Any, reference_dataset: Any | None = None) -> QualityResult:
         results: List[DetectorResult] = []
         for detector in self.detectors:
             try:
