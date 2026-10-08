@@ -159,10 +159,10 @@ def test_constraints_are_ml_inferred_without_table_specific_ranges():
         if x["column"] == "numeric_measure"
     )
 
-    assert temporal["model"] == "IsolationForest"
-    assert hierarchy["model"] == "IsolationForest"
+    assert temporal["model"] == "ensemble"
+    assert hierarchy["model"] == "ensemble"
     assert binary["lower"] == 0.0 and binary["upper"] == 1.0
-    assert numeric["model"] == "IsolationForest"
+    assert numeric["model"] == "IsolationForest+LOF+OneClassSVM"
     assert numeric["lower"] <= 10.0
     assert numeric["upper"] >= 19.5
 
