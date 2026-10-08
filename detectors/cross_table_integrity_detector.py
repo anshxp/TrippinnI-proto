@@ -369,13 +369,16 @@ class CrossTableIntegrityDetector:
 
         negative_budget = 2_000
         for child_value in unresolved_children:
-            for match_value, score, _ in process.extract(
-                child_value, parent_pool, scorer=fuzz.ratio, limit=3
-            ):
+            for match_value in parent_pool:
+                score = fuzz.ratio(child_value, str(match_value))
                 if score <= 55 and negative_budget > 0:
                     training_x.append(features(child_value, str(match_value)))
                     training_y.append(0)
                     negative_budget -= 1
+                if negative_budget == 0:
+                    break
+            if negative_budget == 0:
+                break
 
         if len(set(training_y)) < 2 or len(training_x) < 10:
             return {
