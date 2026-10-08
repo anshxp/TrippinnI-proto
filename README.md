@@ -320,7 +320,7 @@ The knowledge graph represents:
 
 Detected issues are enriched with graph context so downstream reports can explain why a field is being evaluated in a particular semantic role.
 
-Cross-table analysis now has two layers: structural relationship discovery and value-level referential-integrity validation. Candidate FK -> PK relationships are validated against the bounded synchronized detection samples, reporting orphan child rows/unique values, missing parent records, parent-key uniqueness, referential coverage, and FK -> PK validity. These findings are explicitly sample-scoped; they are not full-table guarantees.
+Cross-table analysis now has two layers: structural relationship discovery and value-level referential-integrity validation. Candidate FK -> PK relationships are validated against the bounded synchronized detection samples, reporting orphan child rows/unique values, missing parent records, parent-key uniqueness, referential coverage, and FK -> PK validity. These findings are explicitly sample-scoped; they are not full-table guarantees. After canonical equality is exhausted, unresolved relationship values can enter a bounded ML-assisted boundary stage. Candidate pairs are generated with string-similarity blocking, a lightweight logistic boundary is trained from high-confidence matches and conservative negatives, and only high-probability predictions with a separation margin are accepted. ML suggestions are recorded as provenance-rich relationship evidence; they do not mutate source data or silently create parent records. This staged approach keeps exact validation cheap and reserves ML computation for ambiguous values.
 
 The generated context artifact is written to outputs/reports/context/healthcare_context.json.
 
