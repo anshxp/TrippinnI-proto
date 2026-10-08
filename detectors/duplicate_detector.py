@@ -161,6 +161,18 @@ class DuplicateDetector(BaseDetector):
                 if not primary_keys:
                     primary_keys = profile.get("primary_keys", [])
 
+                # When explicit key inference is unavailable, an identifier
+                # semantic type is still strong enough for duplicate detection.
+                # This keeps key-quality checks useful for lightweight profiles
+                # while fuzzy matching remains disabled for identifiers.
+                if not primary_keys:
+                    columns = profile.get("columns", {}) or {}
+                    primary_keys = [
+                        column for column, metadata in columns.items()
+                        if metadata.get("semantic_type") in {"identifier", "id", "key"}
+                        and column in df.columns
+                    ]
+
             key_duplicates = 0
             for column in primary_keys:
                 if column not in df.columns:
