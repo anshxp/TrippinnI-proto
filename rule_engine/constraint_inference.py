@@ -162,15 +162,22 @@ class ConstraintInferer:
 
             model = self._isolation_forest(len(X))
             model.fit(X)
-            inlier_fraction = float(np.mean(model.predict(X) == 1))
-            conf = calibrate_confidence(fd, inlier_fraction)
+            ml_inlier_fraction = float(np.mean(model.predict(X) == 1))
+
+            # A strong functional dependency is already direct relational
+            # evidence. IsolationForest is used as supporting evidence here,
+            # not as a hard veto: small, repeated relationship tables can make
+            # unsupervised tree models unstable even when the dependency is exact.
+            relational_inlier_support = max(fd, ml_inlier_fraction)
+            conf = calibrate_confidence(fd, relational_inlier_support)
             constraints.append(HierarchyConstraint(
                 child=child,
                 parent=parent,
                 confidence=conf,
                 evidence=(
                     "relational ensemble: functional-dependency analysis + IsolationForest; "
-                    f"{fd:.3f} functional dependency, {inlier_fraction:.3f} relational inlier support"
+                    f"{fd:.3f} functional dependency, {ml_inlier_fraction:.3f} ML inlier support, "
+                    f"{relational_inlier_support:.3f} combined relational support"
                 ),
             ))
         return constraints
