@@ -6,6 +6,15 @@ from typing import Any, Dict
 
 import pandas as pd
 
+from config import (
+    CROSS_TABLE_ML_ENABLED,
+    CROSS_TABLE_ML_MAX_CHILD_VALUES,
+    CROSS_TABLE_ML_MAX_PARENT_VALUES,
+    CROSS_TABLE_ML_MIN_FUZZY_SIMILARITY,
+    CROSS_TABLE_ML_MIN_MARGIN,
+    CROSS_TABLE_ML_MIN_PROBABILITY,
+)
+
 from models.detector_result import DetectorResult
 from models.issue import Issue
 
@@ -308,6 +317,9 @@ class CrossTableIntegrityDetector:
         This is relationship inference, not silent data mutation. Accepted matches
         are reported as recovered relationships and remain fully auditable.
         """
+        if not CROSS_TABLE_ML_ENABLED:
+            return {"matches": {}, "candidate_count": 0, "ambiguous_count": 0, "model_used": False}
+
         from rapidfuzz import fuzz, process
         from sklearn.linear_model import LogisticRegression
         import numpy as np
@@ -324,10 +336,8 @@ class CrossTableIntegrityDetector:
 
         # Keep candidate generation bounded. This prevents an O(N*M) comparison
         # over large healthcare tables.
-        max_children = 1_000
-        max_parents = 10_000
-        unresolved_children = unresolved_children[:max_children]
-        parent_pool = parent_unique[:max_parents]
+        unresolved_children = unresolved_children[:CROSS_TABLE_ML_MAX_CHILD_VALUES]
+        parent_pool = parent_unique[:CROSS_TABLE_ML_MAX_PARENT_VALUES]
 
         def features(a: str, b: str) -> list[float]:
             ratio = fuzz.ratio(a, b) / 100.0
@@ -407,7 +417,11 @@ class CrossTableIntegrityDetector:
 
             # High precision is preferred over recall. We never convert an
             # ambiguous ML suggestion into a valid FK relationship.
-            if best_probability >= 0.995 and margin >= 0.05 and best_fuzzy >= 80:
+            if (
+                best_probability >= CROSS_TABLE_ML_MIN_PROBABILITY
+                and margin >= CROSS_TABLE_ML_MIN_MARGIN
+                and best_fuzzy >= CROSS_TABLE_ML_MIN_FUZZY_SIMILARITY
+            ):
                 matches[child_value] = {
                     "parent_value": best_parent,
                     "probability": round(best_probability, 6),
