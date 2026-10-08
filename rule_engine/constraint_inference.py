@@ -95,7 +95,23 @@ class ConstraintInferer:
             X = np.column_stack([delta, np.abs(delta)])
             model = self._isolation_forest(len(delta))
             model.fit(X)
-            inlier_fraction = float(np.mean(model.predict(X) == 1))
+            ml_inlier_fraction = float(np.mean(model.predict(X) == 1))
+
+            # Repeated clinical timestamps can make IsolationForest unstable:
+            # the same small set of deltas may appear hundreds of times. Use a
+            # robust MAD-based support estimate as the second ensemble signal,
+            # rather than allowing the tree model alone to suppress an otherwise
+            # strongly directional temporal relationship.
+            median_delta = float(np.median(delta))
+            mad = float(np.median(np.abs(delta - median_delta)))
+            if mad > 0:
+                robust_inlier_fraction = float(
+                    np.mean(np.abs(delta - median_delta) <= 6.0 * mad)
+                )
+            else:
+                robust_inlier_fraction = float(np.mean(delta == median_delta))
+
+            inlier_fraction = max(ml_inlier_fraction, robust_inlier_fraction)
             if inlier_fraction < 0.50:
                 continue
 
@@ -105,8 +121,8 @@ class ConstraintInferer:
                 end=end,
                 confidence=conf,
                 evidence=(
-                    "temporal ensemble: directional distribution + IsolationForest; "
-                    f"{inlier_fraction:.3f} inlier support, {dominance:.3f} directional support"
+                    "temporal ensemble: directional distribution + IsolationForest + robust MAD support; "
+                    f"{inlier_fraction:.3f} ensemble inlier support, {dominance:.3f} directional support"
                 ),
             ))
         return self._dedupe_temporal(constraints)
