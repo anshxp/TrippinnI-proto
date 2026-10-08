@@ -119,4 +119,4 @@ def test_cross_table_integrity_uses_ml_boundary_for_high_confidence_near_matches
     assert stats["orphan_unique_values"] == 0
     assert stats["referential_coverage"] == 1.0
     assert stats["fk_to_pk_valid"] is True
-    assert "patient-00l" in stats["ml_matches"]
+    assert "patient-00l23" in stats["ml_matches"]
