@@ -84,6 +84,12 @@ class CrossTableIntegrityDetector:
                 stats["referential_coverage"] = round(
                     (child_count - stats["orphan_rows"]) / max(child_count, 1), 6
                 )
+                unique_child_count = int(stats["child_unique_values"])
+                stats["unique_referential_coverage"] = round(
+                    (unique_child_count - stats["orphan_unique_values"])
+                    / max(unique_child_count, 1),
+                    6,
+                )
             else:
                 stats["ml_recovered_rows"] = 0
                 stats["ml_recovered_unique_values"] = 0
