@@ -7,7 +7,7 @@ reference ranges unless external clinical provenance is attached.
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass
-from itertools import combinations
+from itertools import combinations, permutations
 from typing import Any
 
 import numpy as np
@@ -135,7 +135,11 @@ class ConstraintInferer:
         ]
         constraints: list[HierarchyConstraint] = []
 
-        for child, parent in combinations(identifiers, 2):
+        # Hierarchy direction is not implied by dataframe column order.
+        # Evaluate both directions and retain only the direction where the
+        # candidate child has greater cardinality and strongly determines the
+        # candidate parent.
+        for child, parent in permutations(identifiers, 2):
             pair = df[[child, parent]].dropna()
             if len(pair) < self.MIN_RELATION_ROWS:
                 continue
