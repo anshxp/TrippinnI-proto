@@ -102,12 +102,12 @@ def test_cross_table_integrity_uses_ml_boundary_for_high_confidence_near_matches
     datasets = {
         "patients": pd.DataFrame({
             "subject_id": [
-                "patient-001", "patient-002", "patient-003",
+                "patient-00123", "patient-00456", "patient-00999",
                 "unrelated-alpha", "unrelated-beta", "unrelated-gamma",
             ]
         }),
         "admissions": pd.DataFrame({
-            "subject_id": ["patient-001", "patient-002", "patient-00l"]
+            "subject_id": ["patient-00123", "patient-00456", "patient-00l23"]
         }),
     }
 
