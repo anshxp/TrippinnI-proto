@@ -52,7 +52,7 @@ class Orchestrator:
         # so you can watch RSS stay bounded across a real 10GB run
         # instead of taking it on faith.
         self._process = psutil.Process()
-        self._checkpoint_version = 4
+        self._checkpoint_version = 5
 
     ##################################################################
 
@@ -287,7 +287,7 @@ class Orchestrator:
 
         print()
         print("=" * 78)
-        print("Dataset profiling, semantic context, and quality detection completed.")
+        print("Dataset profiling, quality detection, and remediation completed.")
         print("=" * 78)
 
     def _build_context_layer(self) -> None:
