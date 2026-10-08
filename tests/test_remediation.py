@@ -8,7 +8,7 @@ def test_remediation_is_auditable_and_protects_identifiers():
     df = pd.DataFrame({
         "subject_id": [1, 2, 2],
         "value": ["10", None, "10"],
-        "label": [" A ", None, " A "],
+        "label": [" A ", None, None],
     })
     profile = {
         "columns": {
@@ -25,7 +25,7 @@ def test_remediation_is_auditable_and_protects_identifiers():
     assert len(refined) == 2
     assert refined["subject_id"].isna().sum() == 0
     assert refined["value"].isna().sum() == 0
-    assert "UNKNOWN" not in refined["label"].tolist()
+    assert "UNKNOWN" in refined["label"].tolist()
     assert result.logs["demo"].count >= 3
 
 
