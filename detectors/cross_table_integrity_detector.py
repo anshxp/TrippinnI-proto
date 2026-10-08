@@ -154,6 +154,7 @@ class CrossTableIntegrityDetector:
                         "parent_non_null_values": int(stats["parent_non_null_values"]),
                         "referential_coverage": float(stats["referential_coverage"]),
                         "unique_referential_coverage": float(stats["unique_referential_coverage"]),
+                        "fk_to_pk_valid": bool(stats["fk_to_pk_valid"]),
                         "validation_scope": "bounded_detection_samples",
                         "reasons": reasons,
                     },
@@ -311,23 +312,19 @@ class CrossTableIntegrityDetector:
         child_values: pd.Series,
         parent_values: pd.Series,
     ) -> Dict[str, Any]:
-        """Resolve a bounded subset of unmatched values with a lightweight ML boundary.
+        """Resolve bounded unmatched values with an auditable ML boundary.
 
-        The matcher is deliberately staged:
-        1. canonical equality is handled before this method;
-        2. only unresolved unique values are candidate-generated with RapidFuzz;
-        3. a logistic model is trained from high-confidence exact-match positives
-           and low-similarity negatives;
-        4. only very high-confidence, clearly separated predictions are accepted.
-
-        This is relationship inference, not silent data mutation. Accepted matches
-        are reported as recovered relationships and remain fully auditable.
+        Exact/canonical equality is handled before this method. Only unresolved
+        string-like values reach the ML stage. Candidate generation is blocked
+        with RapidFuzz, while the classifier learns a local boundary from exact
+        matches plus deterministic one-character corruption examples and
+        conservative negatives. The model never mutates source data.
         """
         if not CROSS_TABLE_ML_ENABLED:
             return {"matches": {}, "candidate_count": 0, "ambiguous_count": 0, "model_used": False}
 
         from rapidfuzz import fuzz, process
-        from sklearn.linear_model import LogisticRegression
+        from sklearn.ensemble import RandomForestClassifier
         import numpy as np
 
         child_unique = [str(v) for v in child_values.dropna().unique().tolist()]
@@ -340,8 +337,11 @@ class CrossTableIntegrityDetector:
         if not unresolved_children:
             return {"matches": {}, "candidate_count": 0, "ambiguous_count": 0, "model_used": False}
 
-        # Keep candidate generation bounded. This prevents an O(N*M) comparison
-        # over large healthcare tables.
+        # Only string-like relationship values are eligible for approximate
+        # matching. Numeric FK/PK relationships remain exact/canonical only.
+        if not any(not value.isdigit() for value in unresolved_children):
+            return {"matches": {}, "candidate_count": 0, "ambiguous_count": 0, "model_used": False}
+
         unresolved_children = unresolved_children[:CROSS_TABLE_ML_MAX_CHILD_VALUES]
         parent_pool = parent_unique[:CROSS_TABLE_ML_MAX_PARENT_VALUES]
 
@@ -349,36 +349,84 @@ class CrossTableIntegrityDetector:
             ratio = fuzz.ratio(a, b) / 100.0
             a_len, b_len = len(a), len(b)
             length_ratio = min(a_len, b_len) / max(a_len, b_len, 1)
+
             prefix = 0
             for x, y in zip(a, b):
                 if x != y:
                     break
                 prefix += 1
+
             suffix = 0
             for x, y in zip(reversed(a), reversed(b)):
                 if x != y:
                     break
                 suffix += 1
+
             overlap = len(set(a) & set(b)) / max(len(set(a) | set(b)), 1)
             numeric_shape = float(a.isdigit() == b.isdigit())
-            return [ratio, length_ratio, prefix / max(a_len, 1), suffix / max(b_len, 1), overlap, numeric_shape]
+            return [
+                ratio,
+                length_ratio,
+                prefix / max(a_len, 1),
+                suffix / max(b_len, 1),
+                overlap,
+                numeric_shape,
+            ]
+
+        def corrupt(value: str) -> list[str]:
+            """Create deterministic, conservative typo-like positive examples."""
+            if len(value) < 4:
+                return []
+
+            alphabet = "abcdefghijklmnopqrstuvwxyz0123456789"
+            variants: list[str] = []
+            for position, current in enumerate(value):
+                replacement = next((char for char in alphabet if char != current), None)
+                if replacement is None:
+                    continue
+                chars = list(value)
+                chars[position] = replacement
+                variant = "".join(chars)
+                if variant != value:
+                    variants.append(variant)
+
+            # One deletion captures a common truncation boundary without
+            # introducing arbitrary synthetic strings.
+            for position in range(len(value)):
+                variant = value[:position] + value[position + 1:]
+                if len(variant) >= 3:
+                    variants.append(variant)
+
+            return variants[:40]
 
         training_x: list[list[float]] = []
         training_y: list[int] = []
 
-        # Exact canonical matches provide positive examples. Low-similarity
-        # blocked candidates provide conservative negatives.
-        common = sorted(set(child_values.dropna().astype(str)).intersection(parent_set))
-        for value in common[:2_000]:
+        common = sorted(
+            set(child_values.dropna().astype(str)).intersection(parent_set)
+        )
+
+        # Exact matches are positives. Synthetic one-edit variants teach the
+        # classifier the intended corruption boundary instead of making it
+        # learn only the identity point.
+        for value in common[:200]:
             training_x.append(features(value, value))
             training_y.append(1)
+            for variant in corrupt(value):
+                training_x.append(features(variant, value))
+                training_y.append(1)
 
+        # Conservative negatives are relationship pairs that are clearly
+        # dissimilar. We also use unrelated parent values from the bounded pool
+        # so the model sees realistic non-matches.
         negative_budget = 2_000
         for child_value in unresolved_children:
-            for match_value in parent_pool:
-                score = fuzz.ratio(child_value, str(match_value))
-                if score <= 55 and negative_budget > 0:
-                    training_x.append(features(child_value, str(match_value)))
+            for parent_value in parent_pool:
+                if child_value == parent_value:
+                    continue
+                score = fuzz.ratio(child_value, str(parent_value))
+                if score <= 70 and negative_budget > 0:
+                    training_x.append(features(child_value, str(parent_value)))
                     training_y.append(0)
                     negative_budget -= 1
                 if negative_budget == 0:
@@ -386,7 +434,24 @@ class CrossTableIntegrityDetector:
             if negative_budget == 0:
                 break
 
-        if len(set(training_y)) < 2 or len(training_x) < 10:
+        # If the relationship has too few exact matches, use dissimilar
+        # cross-pairs from the observed parent set as additional negatives.
+        if negative_budget > 0 and len(common) > 1:
+            for left in common[:200]:
+                for right in common[:200]:
+                    if left == right:
+                        continue
+                    score = fuzz.ratio(left, right)
+                    if score <= 70:
+                        training_x.append(features(left, right))
+                        training_y.append(0)
+                        negative_budget -= 1
+                    if negative_budget == 0:
+                        break
+                if negative_budget == 0:
+                    break
+
+        if len(set(training_y)) < 2 or len(training_x) < 6:
             return {
                 "matches": {},
                 "candidate_count": 0,
@@ -394,10 +459,13 @@ class CrossTableIntegrityDetector:
                 "model_used": False,
             }
 
-        model = LogisticRegression(
+        model = RandomForestClassifier(
+            n_estimators=50,
+            max_depth=6,
+            min_samples_leaf=1,
             random_state=42,
             class_weight="balanced",
-            max_iter=300,
+            n_jobs=-1,
         )
         model.fit(np.asarray(training_x), np.asarray(training_y))
 
@@ -407,7 +475,11 @@ class CrossTableIntegrityDetector:
 
         for child_value in unresolved_children:
             candidates = process.extract(
-                child_value, parent_pool, scorer=fuzz.ratio, limit=3
+                child_value,
+                parent_pool,
+                scorer=fuzz.ratio,
+                score_cutoff=CROSS_TABLE_ML_MIN_FUZZY_SIMILARITY,
+                limit=3,
             )
             if not candidates:
                 continue
@@ -424,8 +496,6 @@ class CrossTableIntegrityDetector:
             second_probability = scored[1][0] if len(scored) > 1 else 0.0
             margin = best_probability - second_probability
 
-            # High precision is preferred over recall. We never convert an
-            # ambiguous ML suggestion into a valid FK relationship.
             if (
                 best_probability >= CROSS_TABLE_ML_MIN_PROBABILITY
                 and margin >= CROSS_TABLE_ML_MIN_MARGIN
