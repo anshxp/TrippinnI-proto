@@ -243,6 +243,142 @@ class CrossTableIntegrityDetector:
             "fk_to_pk_valid": orphan_rows == 0 and duplicate_parent_keys == 0,
         }
 
+
+
+    @staticmethod
+    def _ml_boundary_matches(
+        child_values: pd.Series,
+        parent_values: pd.Series,
+    ) -> Dict[str, Any]:
+        """Resolve a bounded subset of unmatched values with a lightweight ML boundary.
+
+        The matcher is deliberately staged:
+        1. canonical equality is handled before this method;
+        2. only unresolved unique values are candidate-generated with RapidFuzz;
+        3. a logistic model is trained from high-confidence exact-match positives
+           and low-similarity negatives;
+        4. only very high-confidence, clearly separated predictions are accepted.
+
+        This is relationship inference, not silent data mutation. Accepted matches
+        are reported as recovered relationships and remain fully auditable.
+        """
+        from rapidfuzz import fuzz, process
+        from sklearn.linear_model import LogisticRegression
+        import numpy as np
+
+        child_unique = [str(v) for v in child_values.dropna().unique().tolist()]
+        parent_unique = [str(v) for v in parent_values.dropna().unique().tolist()]
+        if not child_unique or not parent_unique:
+            return {"matches": {}, "candidate_count": 0, "ambiguous_count": 0, "model_used": False}
+
+        parent_set = set(parent_unique)
+        unresolved_children = [v for v in child_unique if v not in parent_set]
+        if not unresolved_children:
+            return {"matches": {}, "candidate_count": 0, "ambiguous_count": 0, "model_used": False}
+
+        # Keep candidate generation bounded. This prevents an O(N*M) comparison
+        # over large healthcare tables.
+        max_children = 1_000
+        max_parents = 10_000
+        unresolved_children = unresolved_children[:max_children]
+        parent_pool = parent_unique[:max_parents]
+
+        def features(a: str, b: str) -> list[float]:
+            ratio = fuzz.ratio(a, b) / 100.0
+            a_len, b_len = len(a), len(b)
+            length_ratio = min(a_len, b_len) / max(a_len, b_len, 1)
+            prefix = 0
+            for x, y in zip(a, b):
+                if x != y:
+                    break
+                prefix += 1
+            suffix = 0
+            for x, y in zip(reversed(a), reversed(b)):
+                if x != y:
+                    break
+                suffix += 1
+            overlap = len(set(a) & set(b)) / max(len(set(a) | set(b)), 1)
+            numeric_shape = float(a.isdigit() == b.isdigit())
+            return [ratio, length_ratio, prefix / max(a_len, 1), suffix / max(b_len, 1), overlap, numeric_shape]
+
+        training_x: list[list[float]] = []
+        training_y: list[int] = []
+
+        # Exact canonical matches provide positive examples. Low-similarity
+        # blocked candidates provide conservative negatives.
+        common = sorted(set(child_values.dropna().astype(str)).intersection(parent_set))
+        for value in common[:2_000]:
+            training_x.append(features(value, value))
+            training_y.append(1)
+
+        negative_budget = 2_000
+        for child_value in unresolved_children:
+            for match_value, score, _ in process.extract(
+                child_value, parent_pool, scorer=fuzz.ratio, limit=3
+            ):
+                if score <= 55 and negative_budget > 0:
+                    training_x.append(features(child_value, str(match_value)))
+                    training_y.append(0)
+                    negative_budget -= 1
+
+        if len(set(training_y)) < 2 or len(training_x) < 10:
+            return {
+                "matches": {},
+                "candidate_count": 0,
+                "ambiguous_count": 0,
+                "model_used": False,
+            }
+
+        model = LogisticRegression(
+            random_state=42,
+            class_weight="balanced",
+            max_iter=300,
+        )
+        model.fit(np.asarray(training_x), np.asarray(training_y))
+
+        matches: Dict[str, Dict[str, Any]] = {}
+        candidate_count = 0
+        ambiguous_count = 0
+
+        for child_value in unresolved_children:
+            candidates = process.extract(
+                child_value, parent_pool, scorer=fuzz.ratio, limit=3
+            )
+            if not candidates:
+                continue
+
+            scored = []
+            for parent_value, fuzzy_score, _ in candidates:
+                candidate_count += 1
+                vector = np.asarray([features(child_value, str(parent_value))])
+                probability = float(model.predict_proba(vector)[0, 1])
+                scored.append((probability, str(parent_value), float(fuzzy_score)))
+
+            scored.sort(reverse=True)
+            best_probability, best_parent, best_fuzzy = scored[0]
+            second_probability = scored[1][0] if len(scored) > 1 else 0.0
+            margin = best_probability - second_probability
+
+            # High precision is preferred over recall. We never convert an
+            # ambiguous ML suggestion into a valid FK relationship.
+            if best_probability >= 0.995 and margin >= 0.05 and best_fuzzy >= 80:
+                matches[child_value] = {
+                    "parent_value": best_parent,
+                    "probability": round(best_probability, 6),
+                    "margin": round(margin, 6),
+                    "fuzzy_similarity": round(best_fuzzy, 3),
+                    "method": "ml_boundary",
+                }
+            else:
+                ambiguous_count += 1
+
+        return {
+            "matches": matches,
+            "candidate_count": candidate_count,
+            "ambiguous_count": ambiguous_count,
+            "model_used": True,
+        }
+
     @staticmethod
     def _canonical_values(series: pd.Series) -> pd.Series:
         values = series.copy()
