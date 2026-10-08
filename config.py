@@ -89,6 +89,14 @@ MIMIC_V31_ROW_COUNTS = {
     "icu_procedureevents": 808_706,
 }
 
+# Module 3 — conservative remediation
+REMEDIATION_ENABLED = True
+REMEDIATION_IMPUTE_NUMERIC = True
+REMEDIATION_IMPUTE_CATEGORICAL = True
+REMEDIATION_REMOVE_EXACT_DUPLICATES = True
+# Encoding remains task-specific and disabled in the baseline prototype.
+REMEDIATION_ENABLE_ENCODING = False
+
 # Local NVMe workspace (F:) for the prototype.
 # Override with environment variables if the dataset/workspace lives elsewhere.
 DATA_ROOT = Path(

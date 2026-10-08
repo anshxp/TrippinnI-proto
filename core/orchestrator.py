@@ -12,6 +12,8 @@ from pathlib import Path
 import psutil
 
 import config
+from preprocessing.executor import RemediationExecutor
+from preprocessing.policy import policy_from_config
 from core.loader import LoaderManager
 from core.memory_utils import downcast_dataframe, release
 from profiling.profiler import DatasetProfilerEngine
@@ -50,7 +52,7 @@ class Orchestrator:
         # so you can watch RSS stay bounded across a real 10GB run
         # instead of taking it on faith.
         self._process = psutil.Process()
-        self._checkpoint_version = 4
+        self._checkpoint_version = 5
 
     ##################################################################
 
@@ -194,6 +196,11 @@ class Orchestrator:
                     result.issues = ContextEngine().enrich_issues(result.issues, local_graph)
                     self.quality_results[table] = result
                     self._save_quality_result(table, result)
+
+                    remediation = RemediationExecutor(policy_from_config(config)).run(
+                        {table: sample}, {table: report}, {table: result}
+                    )
+                    self._save_remediation_result(table, remediation)
                     detection_elapsed = time.monotonic() - detection_started
 
                     print(
@@ -264,6 +271,11 @@ class Orchestrator:
             self.quality_results[table] = result
             self._save_quality_result(table, result)
 
+            remediation = RemediationExecutor(policy_from_config(config)).run(
+                {table: detection_frame}, {table: self.profiles[table]}, {table: result}
+            )
+            self._save_remediation_result(table, remediation)
+
             release(dataframe, detection_frame)
             loader.clear_cache()
             self._log_memory(table)
@@ -275,7 +287,7 @@ class Orchestrator:
 
         print()
         print("=" * 78)
-        print("Dataset profiling, semantic context, and quality detection completed.")
+        print("Dataset profiling, quality detection, and remediation completed.")
         print("=" * 78)
 
     def _build_context_layer(self) -> None:
