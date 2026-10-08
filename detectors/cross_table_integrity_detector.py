@@ -48,6 +48,46 @@ class CrossTableIntegrityDetector:
                 parent,
                 target_column,
             )
+
+            # Exact/canonical integrity is always authoritative. ML is only
+            # allowed to resolve values that remain unmatched after that step.
+            child_values = self._canonical_values(child[source_column])
+            parent_values = self._canonical_values(parent[target_column])
+            boundary = self._ml_boundary_matches(child_values, parent_values)
+            ml_matches = boundary["matches"]
+
+            if ml_matches:
+                matched_by_ml = child_values.astype(str).isin(ml_matches.keys())
+                ml_resolved_rows = int(matched_by_ml.sum())
+                original_orphan_rows = int(stats["orphan_rows"])
+                original_orphan_unique = int(stats["orphan_unique_values"])
+                stats["ml_recovered_rows"] = ml_resolved_rows
+                stats["ml_recovered_unique_values"] = len(ml_matches)
+                stats["ml_candidate_count"] = int(boundary["candidate_count"])
+                stats["ml_ambiguous_count"] = int(boundary["ambiguous_count"])
+                stats["ml_boundary_used"] = True
+                stats["ml_matches"] = ml_matches
+                stats["orphan_rows"] = max(0, original_orphan_rows - ml_resolved_rows)
+                stats["orphan_unique_values"] = max(
+                    0, original_orphan_unique - len(ml_matches)
+                )
+                child_count = int(stats["child_non_null_values"])
+                stats["referential_coverage"] = round(
+                    (child_count - stats["orphan_rows"]) / max(child_count, 1), 6
+                )
+            else:
+                stats["ml_recovered_rows"] = 0
+                stats["ml_recovered_unique_values"] = 0
+                stats["ml_candidate_count"] = int(boundary["candidate_count"])
+                stats["ml_ambiguous_count"] = int(boundary["ambiguous_count"])
+                stats["ml_boundary_used"] = bool(boundary["model_used"])
+                stats["ml_matches"] = {}
+
+            stats["fk_to_pk_valid"] = (
+                stats["orphan_rows"] == 0
+                and stats["duplicate_parent_keys"] == 0
+            )
+
             stats.update({
                 "child_table": source_table,
                 "child_column": source_column,
@@ -87,6 +127,12 @@ class CrossTableIntegrityDetector:
                         "target_column": target_column,
                         "orphan_rows": orphan_rows,
                         "orphan_unique_values": int(stats["orphan_unique_values"]),
+                        "ml_boundary_used": bool(stats["ml_boundary_used"]),
+                        "ml_recovered_rows": int(stats["ml_recovered_rows"]),
+                        "ml_recovered_unique_values": int(stats["ml_recovered_unique_values"]),
+                        "ml_candidate_count": int(stats["ml_candidate_count"]),
+                        "ml_ambiguous_count": int(stats["ml_ambiguous_count"]),
+                        "ml_matches": stats["ml_matches"],
                         "missing_parent_records": int(stats["orphan_unique_values"]),
                         "duplicate_parent_keys": duplicate_parent_keys,
                         "child_non_null_values": int(stats["child_non_null_values"]),
