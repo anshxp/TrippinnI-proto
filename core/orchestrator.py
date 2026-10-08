@@ -12,6 +12,8 @@ from pathlib import Path
 import psutil
 
 import config
+from preprocessing.executor import RemediationExecutor
+from preprocessing.policy import policy_from_config
 from core.loader import LoaderManager
 from core.memory_utils import downcast_dataframe, release
 from profiling.profiler import DatasetProfilerEngine
@@ -194,6 +196,11 @@ class Orchestrator:
                     result.issues = ContextEngine().enrich_issues(result.issues, local_graph)
                     self.quality_results[table] = result
                     self._save_quality_result(table, result)
+
+                    remediation = RemediationExecutor(policy_from_config(config)).run(
+                        {table: sample}, {table: report}, {table: result}
+                    )
+                    self._save_remediation_result(table, remediation)
                     detection_elapsed = time.monotonic() - detection_started
 
                     print(
@@ -263,6 +270,11 @@ class Orchestrator:
 
             self.quality_results[table] = result
             self._save_quality_result(table, result)
+
+            remediation = RemediationExecutor(policy_from_config(config)).run(
+                {table: detection_frame}, {table: self.profiles[table]}, {table: result}
+            )
+            self._save_remediation_result(table, remediation)
 
             release(dataframe, detection_frame)
             loader.clear_cache()
