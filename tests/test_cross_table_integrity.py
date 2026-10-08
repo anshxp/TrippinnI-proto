@@ -95,3 +95,28 @@ def test_cross_table_integrity_passes_valid_fk_to_pk_relationship():
     assert stats["referential_coverage"] == 1.0
     assert stats["unique_referential_coverage"] == 1.0
     assert stats["fk_to_pk_valid"] is True
+
+
+def test_cross_table_integrity_uses_ml_boundary_for_high_confidence_near_matches():
+    graph = _graph_with_relationship()
+    datasets = {
+        "patients": pd.DataFrame({
+            "subject_id": [
+                "patient-001", "patient-002", "patient-003",
+                "unrelated-alpha", "unrelated-beta", "unrelated-gamma",
+            ]
+        }),
+        "admissions": pd.DataFrame({
+            "subject_id": ["patient-001", "patient-002", "patient-00l"]
+        }),
+    }
+
+    result = CrossTableIntegrityDetector().detect(datasets, graph)
+
+    stats = next(iter(result.statistics.values()))
+    assert stats["ml_boundary_used"] is True
+    assert stats["ml_recovered_unique_values"] >= 1
+    assert stats["orphan_unique_values"] == 0
+    assert stats["referential_coverage"] == 1.0
+    assert stats["fk_to_pk_valid"] is True
+    assert "patient-00l" in stats["ml_matches"]
