@@ -85,9 +85,9 @@ class ConstraintInferer:
 
             direction = directional_support(delta)
             positive_rate, negative_rate = direction["positive"], direction["negative"]
-            if positive_rate >= 0.98:
+            if positive_rate >= 0.95:
                 start, end, dominance = left, right, positive_rate
-            elif negative_rate >= 0.98:
+            elif negative_rate >= 0.95:
                 start, end, dominance = right, left, negative_rate
             else:
                 continue
