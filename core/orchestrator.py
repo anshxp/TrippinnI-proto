@@ -13,6 +13,7 @@ import psutil
 
 import config
 from core.loader import LoaderManager
+from preprocessing.csv_runtime import run_csv_chunks
 from core.memory_utils import downcast_dataframe, release
 from profiling.profiler import DatasetProfilerEngine
 from quality.detector import QualityDetector
@@ -100,6 +101,8 @@ class Orchestrator:
 
             if table in completed_tables:
                 print(f"[{table_index}/{total_tables}] SKIP: {table} (already completed)")
+                if config.PREPROCESSING_ENABLED and hasattr(loader, "get_dataframe_chunks"):
+                    self._run_preprocessing_if_enabled(table, self._get_source_path(loader, table))
                 continue
 
             if hasattr(loader, "get_dataframe_chunks"):
@@ -211,6 +214,7 @@ class Orchestrator:
                 self._mark_table_complete(table)
                 completed_tables.add(table)
                 print(f"  Checkpoint saved: {table}")
+                self._run_preprocessing_if_enabled(table, source_path)
                 continue
 
             # Fallback for any loader without chunked reading support
@@ -270,6 +274,8 @@ class Orchestrator:
             self._mark_table_complete(table)
             completed_tables.add(table)
             print(f"  Checkpoint saved: {table}")
+            if hasattr(loader, "get_dataframe_chunks"):
+                self._run_preprocessing_if_enabled(table, self._get_source_path(loader, table))
 
         self._build_context_layer()
 
@@ -277,6 +283,44 @@ class Orchestrator:
         print("=" * 78)
         print("Dataset profiling, semantic context, and quality detection completed.")
         print("=" * 78)
+
+    def _run_preprocessing_if_enabled(self, table: str, source_path: Path) -> None:
+        """Run opt-in preprocessing after profiling without modifying source data."""
+        if not config.PREPROCESSING_ENABLED:
+            return
+        source_path = Path(source_path)
+        if not source_path.is_file() or "".join(source_path.suffixes[-2:]).lower() not in {".csv", ".csv.gz"}:
+            print(f"  Preprocessing skipped for {table}: source is not a supported CSV file")
+            return
+
+        output_dir = config.OUTPUT_ROOT / "preprocessing" / table
+        expected_output = output_dir / f"{source_path.stem}_processed.csv"
+        expected_report = output_dir / f"{source_path.stem}_chunk_report.json"
+        if expected_output.is_file() and expected_report.is_file():
+            print(f"  Preprocessing already exists for {table}: {expected_output}")
+            return
+
+        print(f"  Stage: LLM-guided preprocessing | source: {source_path.name}")
+        try:
+            summary = run_csv_chunks(
+                source_path,
+                output_dir=output_dir,
+                chunksize=config.PREPROCESSING_CHUNK_SIZE,
+                model=config.PREPROCESSING_MODEL,
+                max_iterations=config.PREPROCESSING_MAX_ITERATIONS,
+                allow_imputation=config.PREPROCESSING_ALLOW_IMPUTATION,
+            )
+        except Exception as exc:
+            print(f"  Preprocessing FAILED for {table}: {type(exc).__name__}: {exc}")
+            return
+
+        print(
+            f"  Preprocessing complete for {table}: "
+            f"{summary['rows_processed']:,} rows across "
+            f"{summary['chunks_processed']:,} chunks"
+        )
+        print(f"  Preprocessed output: {summary['output_file']}")
+        print(f"  Preprocessing report: {summary['summary_report']}")
 
     def _build_context_layer(self) -> None:
         """Build and persist the dataset-level semantic/knowledge context."""
