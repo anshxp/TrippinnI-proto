@@ -101,8 +101,6 @@ class Orchestrator:
 
             if table in completed_tables:
                 print(f"[{table_index}/{total_tables}] SKIP: {table} (already completed)")
-                if config.PREPROCESSING_ENABLED and hasattr(loader, "get_dataframe_chunks"):
-                    self._run_preprocessing_if_enabled(table, self._get_source_path(loader, table))
                 continue
 
             if hasattr(loader, "get_dataframe_chunks"):
@@ -274,17 +272,24 @@ class Orchestrator:
             self._mark_table_complete(table)
             completed_tables.add(table)
             print(f"  Checkpoint saved: {table}")
-            if hasattr(loader, "get_dataframe_chunks"):
-                self._run_preprocessing_if_enabled(table, self._get_source_path(loader, table))
-
+        
         self._build_context_layer()
+
+        # Preprocess only after all selected table profiles and cross-table metadata
+        # are available. Raw rows are never sent to the planner.
+        if config.PREPROCESSING_ENABLED and hasattr(loader, "get_dataframe_chunks"):
+            for table in tables:
+                if table in config.PREPROCESSING_TABLES:
+                    self._run_preprocessing_if_enabled(
+                        table, self._get_source_path(loader, table), loader=loader
+                    )
 
         print()
         print("=" * 78)
         print("Dataset profiling, semantic context, and quality detection completed.")
         print("=" * 78)
 
-    def _run_preprocessing_if_enabled(self, table: str, source_path: Path) -> None:
+    def _run_preprocessing_if_enabled(self, table: str, source_path: Path, *, loader=None) -> None:
         """Run opt-in preprocessing after profiling without modifying source data."""
         if not config.PREPROCESSING_ENABLED:
             return
@@ -303,7 +308,28 @@ class Orchestrator:
             print(f"  Preprocessing already exists for {table}: {expected_output}")
             return
 
-        print(f"  Stage: LLM-guided preprocessing | source: {source_path.name}")
+        # Use official row counts where available; count only small unknown tables.
+        total_rows = self._get_mimic_row_count(table)
+        if total_rows <= 0 and loader is not None and hasattr(loader, "get_row_count"):
+            try:
+                total_rows = loader.get_row_count(
+                    table, max_file_size_mb=config.CSV_ROW_COUNT_FALLBACK_MAX_MB
+                )
+            except (OSError, ValueError):
+                total_rows = 0
+        if total_rows <= 0:
+            print(
+                f"  Preprocessing skipped for {table}: row count is unknown; "
+                "cannot enforce the configured 10% prefix safely"
+            )
+            return
+        max_rows = max(1, int(total_rows * config.PROFILE_PREFIX_FRACTION))
+        context_metadata = self._preprocessing_context_metadata()
+        print(
+            f"  Stage: LLM-guided preprocessing | source: {source_path.name} | "
+            f"prefix: first {max_rows:,}/{total_rows:,} rows "
+            f"({config.PROFILE_PREFIX_FRACTION:.0%})"
+        )
         try:
             summary = run_csv_chunks(
                 source_path,
@@ -312,6 +338,8 @@ class Orchestrator:
                 model=config.PREPROCESSING_MODEL,
                 max_iterations=config.PREPROCESSING_MAX_ITERATIONS,
                 allow_imputation=config.PREPROCESSING_ALLOW_IMPUTATION,
+                max_rows=max_rows,
+                context_metadata=context_metadata,
             )
         except Exception as exc:
             print(f"  Preprocessing FAILED for {table}: {type(exc).__name__}: {exc}")
@@ -324,6 +352,26 @@ class Orchestrator:
         )
         print(f"  Preprocessed output: {summary['output_file']}")
         print(f"  Preprocessing report: {summary['summary_report']}")
+
+    def _preprocessing_context_metadata(self) -> dict:
+        """Return aggregate schema and candidate-link metadata, never source rows."""
+        context = {
+            "context_version": self.semantic_context.get("context_version", "unknown"),
+            "scope": "metadata_only_cross_table_context",
+            "tables": self.semantic_context.get("tables", {}),
+            "candidate_relationships": [],
+        }
+        if self.knowledge_graph is not None:
+            graph = self.knowledge_graph.to_dict()
+            context["candidate_relationships"] = [
+                edge for edge in graph.get("edges", [])
+                if edge.get("relation") in {
+                    "SHARED_IDENTIFIER_CANDIDATE",
+                    "CANDIDATE_PRIMARY_KEY",
+                    "CANDIDATE_FOREIGN_KEY",
+                }
+            ]
+        return context
 
     def _build_context_layer(self) -> None:
         """Build and persist the dataset-level semantic/knowledge context."""
