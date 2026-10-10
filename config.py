@@ -7,6 +7,7 @@ from pathlib import Path
 
 # Local LLM configuration (Ollama).
 # Run: ollama pull qwen3:4b
+# Set per machine: qwen3:8b on 32 GB, qwen3:4b on 8 GB. Explicit override avoids unreliable RAM/GPU guesses.
 LLM_MODEL = os.getenv("TRIPPINNI_LLM_MODEL", "qwen3:4b")
 OLLAMA_BASE_URL = os.getenv("TRIPPINNI_OLLAMA_URL", "http://localhost:11434")
 MAX_NEW_TOKENS = 512
@@ -22,6 +23,10 @@ PREPROCESSING_CHUNK_SIZE = int(os.getenv("TRIPPINNI_PREPROCESSING_CHUNK_SIZE", "
 PREPROCESSING_MODEL = os.getenv("TRIPPINNI_PREPROCESSING_MODEL", LLM_MODEL)
 PREPROCESSING_MAX_ITERATIONS = int(os.getenv("TRIPPINNI_PREPROCESSING_MAX_ITERATIONS", "3"))
 PREPROCESSING_ALLOW_IMPUTATION = os.getenv("TRIPPINNI_PREPROCESSING_ALLOW_IMPUTATION", "0").strip().lower() in {"1", "true", "yes"}
+# Empty allowlist means the orchestrator will not preprocess any table.
+PREPROCESSING_TABLES = {name.strip() for name in os.getenv("TRIPPINNI_PREPROCESSING_TABLES", "").split(",") if name.strip()}
+# Conservative context sizes: 2048 for 8 GB, 4096 for 32 GB.
+OLLAMA_NUM_CTX = int(os.getenv("TRIPPINNI_OLLAMA_NUM_CTX", "2048"))
 
 # Prototype profiling configuration
 # Process only the deterministic first fraction of each source table.
