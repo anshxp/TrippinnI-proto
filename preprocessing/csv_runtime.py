@@ -24,6 +24,8 @@ def run_csv_chunks(
     model: str = "qwen3:4b",
     max_iterations: int = 5,
     allow_imputation: bool = False,
+    max_rows: int | None = 5_000,
+    context_metadata: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Process CSV chunks, then stream-align their output schemas."""
     source = Path(input_path)
@@ -32,13 +34,18 @@ def run_csv_chunks(
         raise FileNotFoundError(f"Input CSV does not exist: {source}")
     if chunksize <= 0:
         raise ValueError("chunksize must be greater than zero")
+    if max_rows is not None and max_rows <= 0:
+        raise ValueError("max_rows must be positive or None")
+    if max_rows is None:
+        raise ValueError("Unbounded preprocessing is disabled. Supply an explicit max_rows limit.")
     destination.mkdir(parents=True, exist_ok=True)
     chunk_root = destination / "chunks"
     chunk_root.mkdir(parents=True, exist_ok=True)
 
-    output_path = destination / f"{source.stem}_processed.csv"
-    temp_path = destination / f".{source.stem}_processed.tmp"
-    index_path = destination / f"{source.stem}_chunk_report.json"
+    source_stem = source.name[:-7] if source.name.lower().endswith(".csv.gz") else source.stem
+    output_path = destination / f"{source_stem}_processed.csv"
+    temp_path = destination / f".{source_stem}_processed.tmp"
+    index_path = destination / f"{source_stem}_chunk_report.json"
     if temp_path.exists():
         temp_path.unlink()
 
@@ -48,7 +55,7 @@ def run_csv_chunks(
     total_rows = 0
     try:
         for chunk_number, chunk in enumerate(
-            pd.read_csv(source, chunksize=chunksize, low_memory=False), start=1
+            pd.read_csv(source, chunksize=chunksize, nrows=max_rows, low_memory=False), start=1
         ):
             chunk_name = f"{source.stem}_chunk_{chunk_number:06d}"
             report = run_dataframe(
@@ -58,6 +65,7 @@ def run_csv_chunks(
                 model=model,
                 max_iterations=max_iterations,
                 allow_imputation=allow_imputation,
+                context_metadata=context_metadata,
             )
             processed_chunk = Path(report["output_file"])
             if not processed_chunk.is_file():
@@ -100,6 +108,9 @@ def run_csv_chunks(
         "input_file": str(source.resolve()),
         "output_file": str(output_path.resolve()),
         "chunksize": chunksize,
+        "max_rows": max_rows,
+        "rows_limit_reached": total_rows >= max_rows,
+        "scope": "bounded_prefix_only",
         "chunks_processed": len(chunk_reports),
         "rows_processed": total_rows,
         "output_columns": output_columns,
@@ -123,6 +134,7 @@ def main() -> None:
     parser.add_argument("--chunksize", type=int, default=50_000)
     parser.add_argument("--model", default="qwen3:4b")
     parser.add_argument("--max-iterations", type=int, default=5)
+    parser.add_argument("--max-rows", type=int, default=5_000, help="Maximum prefix rows to process; unbounded scans are disabled")
     parser.add_argument(
         "--allow-imputation",
         action="store_true",
@@ -136,6 +148,7 @@ def main() -> None:
         model=args.model,
         max_iterations=args.max_iterations,
         allow_imputation=args.allow_imputation,
+        max_rows=args.max_rows,
     )
     print(json.dumps(result, indent=2, default=str))
 
