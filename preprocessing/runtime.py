@@ -7,7 +7,7 @@ from preprocessing.agent import OllamaPlanner
 from preprocessing.registry import build_action_registry, profile_dataframe
 
 
-def run_dataframe(df: pd.DataFrame, *, file_name: str, output_dir: str | Path, model: str = "qwen3:4b", max_iterations: int = 5, allow_imputation: bool = False) -> dict:
+def run_dataframe(df: pd.DataFrame, *, file_name: str, output_dir: str | Path, model: str = "qwen3:4b", max_iterations: int = 5, allow_imputation: bool = False, context_metadata: dict | None = None) -> dict:
     """Profile -> LLM selects one registered tool -> execute -> re-profile.
 
     Pass a bounded chunk/table. This function does not read whole source files.
@@ -24,7 +24,7 @@ def run_dataframe(df: pd.DataFrame, *, file_name: str, output_dir: str | Path, m
     profile=profile_dataframe(working)
     history=[]; reports=[]; run_id=uuid.uuid4().hex
     for iteration in range(1,max_iterations+1):
-        decision=planner.choose_action(profile,specs,history)
+        decision=planner.choose_action(profile,specs,history,context_metadata=context_metadata)
         name=decision.get("action")
         if decision.get("stop") is True or name=="stop": break
         if name not in spec_map: raise ValueError(f"LLM selected unregistered action: {name!r}")
@@ -45,7 +45,7 @@ def run_dataframe(df: pd.DataFrame, *, file_name: str, output_dir: str | Path, m
     output_path=root/f"{safe_name}_processed.csv"; tmp=output_path.with_suffix(".tmp")
     working.to_csv(tmp,index=False); tmp.replace(output_path)
     report_path=root/f"{safe_name}_preprocessing_report.json"
-    report={"run_id":run_id,"file_name":file_name,"iterations":len(reports),"model":model,"final_profile":profile,"actions":reports,"output_file":str(output_path),"archive_dir":str(archive)}
+    report={"run_id":run_id,"file_name":file_name,"iterations":len(reports),"model":model,"context_metadata_tables": list((context_metadata or {}).get("tables", {}).keys()),"final_profile":profile,"actions":reports,"output_file":str(output_path),"archive_dir":str(archive)}
     report_path.write_text(json.dumps(report,indent=2,default=str),encoding="utf-8")
     report["report_file"]=str(report_path)
     return report
