@@ -57,3 +57,21 @@ The source is read in bounded chunks. Each chunk receives its own profile, plann
 This is still an opt-in stage and does not alter the default profiling orchestrator. Since planning and statistics are chunk-local, action choices and thresholds can differ across chunks. This implementation does not yet provide dataset-global thresholds, rollback across all chunk archives, clinical approval, or a validated EHR remediation workflow. Use synthetic/de-identified fixtures, and never commit clinical data or archives to Git.
 
 Median imputation remains disabled by default. To explicitly enable it for an experiment, add `--allow-imputation`; this switch is not a substitute for clinical or data-owner approval.
+
+## Orchestrator integration
+
+The main orchestrator now calls the preprocessing stage after the existing profiling/quality pass for CSV-backed tables, including tables already marked complete by the profiling checkpoint. The feature is disabled by default and writes only under `outputs/preprocessing/<table>/`; it does not replace source files or change profiling results.
+
+Enable it for an explicit run in PowerShell:
+
+```powershell
+$env:TRIPPINNI_PREPROCESSING_ENABLED = "1"
+$env:TRIPPINNI_PREPROCESSING_CHUNK_SIZE = "50000"
+$env:TRIPPINNI_PREPROCESSING_MODEL = "qwen3:4b"
+$env:TRIPPINNI_PREPROCESSING_MAX_ITERATIONS = "3"
+python main.py
+```
+
+To permit numeric median imputation, set `TRIPPINNI_PREPROCESSING_ALLOW_IMPUTATION=1` only after explicit data-owner review. It remains off by default. If the processed CSV and chunk report already exist, the orchestrator skips the preprocessing run; delete those generated outputs to force a rerun. A preprocessing error is logged and does not invalidate a successful profiling checkpoint.
+
+**Performance warning:** enabling this globally runs the planner separately for every chunk across every CSV table and scans the full source file. Do not enable it for the entire MIMIC-IV corpus as a first run. Start with one small, de-identified CSV and a small chunk size, inspect reports and outputs, then decide which tables to enable. This is still experimental and does not provide global cross-chunk thresholds or clinical validation.
