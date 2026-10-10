@@ -68,6 +68,7 @@ class OllamaPlanner:
         profile: dict[str, Any],
         actions: list[ActionSpec],
         history: list[dict[str, Any]],
+        context_metadata: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Return one JSON action decision; never return executable code."""
         action_catalog = [asdict(item) for item in actions]
@@ -86,6 +87,8 @@ class OllamaPlanner:
             "profile_summary": profile,
             "available_actions": action_catalog,
             "recent_action_history": history[-8:],
+            # Aggregate profiles/schema/relationship metadata only; never raw patient rows.
+            "cross_table_context_metadata": context_metadata or {},
             "required_output_schema": {
                 "action": "registered action name or stop",
                 "parameters": {},
