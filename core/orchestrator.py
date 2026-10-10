@@ -288,6 +288,9 @@ class Orchestrator:
         """Run opt-in preprocessing after profiling without modifying source data."""
         if not config.PREPROCESSING_ENABLED:
             return
+        if table not in config.PREPROCESSING_TABLES:
+            print(f"  Preprocessing skipped for {table}: not listed in TRIPPINNI_PREPROCESSING_TABLES")
+            return
         source_path = Path(source_path)
         if not source_path.is_file() or "".join(source_path.suffixes[-2:]).lower() not in {".csv", ".csv.gz"}:
             print(f"  Preprocessing skipped for {table}: source is not a supported CSV file")
