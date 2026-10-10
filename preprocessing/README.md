@@ -44,12 +44,16 @@ records rather than delete them. The archive currently captures cells replaced
 by median imputation; flag-only methods do not remove or overwrite source values.
 Original input DataFrames are copied before processing.
 
-## Important integration boundary
+## Chunked CSV entry point
 
-This is an opt-in runner for a bounded DataFrame or chunk. It is not yet wired
-into `core/orchestrator.py` or the full chunk-streaming file writer. Do not
-pass an entire large MIMIC-IV table into memory. Next, connect the runner to
-the existing chunk reader and atomically write a versioned output per file,
-with dataset-level rollback and postcondition tests before using it on real EHR
-data. Use synthetic/de-identified test fixtures, and never commit clinical data
-or archives to Git.
+Run a large CSV without loading the entire source table into RAM:
+
+```powershell
+python -m preprocessing.csv_runtime path/to/input.csv --output-dir outputs/preprocessing --chunksize 50000 --model qwen3:4b
+```
+
+The source is read in bounded chunks. Each chunk receives its own profile, planner decisions, action report, and archive; processed chunks are then streamed into one output CSV. The writer aligns the union of generated columns so an action-specific flag added in one chunk does not shift values in later chunks. A chunk-index JSON report records the run reports and row counts.
+
+This is still an opt-in stage and does not alter the default profiling orchestrator. Since planning and statistics are chunk-local, action choices and thresholds can differ across chunks. This implementation does not yet provide dataset-global thresholds, rollback across all chunk archives, clinical approval, or a validated EHR remediation workflow. Use synthetic/de-identified fixtures, and never commit clinical data or archives to Git.
+
+Median imputation remains disabled by default. To explicitly enable it for an experiment, add `--allow-imputation`; this switch is not a substitute for clinical or data-owner approval.
