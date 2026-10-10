@@ -212,7 +212,6 @@ class Orchestrator:
                 self._mark_table_complete(table)
                 completed_tables.add(table)
                 print(f"  Checkpoint saved: {table}")
-                self._run_preprocessing_if_enabled(table, source_path)
                 continue
 
             # Fallback for any loader without chunked reading support
