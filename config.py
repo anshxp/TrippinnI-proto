@@ -5,10 +5,12 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
-# LLM configuration
-LLM_MODEL = "Qwen/Qwen3-4B-Instruct"
+# Local LLM configuration (Ollama).
+# Run: ollama pull qwen3:4b
+LLM_MODEL = os.getenv("TRIPPINNI_LLM_MODEL", "qwen3:4b")
+OLLAMA_BASE_URL = os.getenv("TRIPPINNI_OLLAMA_URL", "http://localhost:11434")
 MAX_NEW_TOKENS = 512
-TEMPERATURE = 0.2
+TEMPERATURE = 0.1
 
 # Chunked processing configuration
 CSV_CHUNK_SIZE = 100_000
