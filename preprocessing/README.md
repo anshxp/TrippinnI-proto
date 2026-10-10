@@ -52,7 +52,7 @@ Run a large CSV without loading the entire source table into RAM:
 python -m preprocessing.csv_runtime path/to/input.csv --output-dir outputs/preprocessing --chunksize 50000 --model qwen3:4b
 ```
 
-The source is read in bounded chunks. Each chunk receives its own profile, planner decisions, action report, and archive; processed chunks are then streamed into one output CSV. The writer aligns the union of generated columns so an action-specific flag added in one chunk does not shift values in later chunks. A chunk-index JSON report records the run reports and row counts.
+The source is read in bounded chunks and capped by an explicit row limit (--max-rows, default 5,000). Each chunk receives its own profile, planner decisions, action report, and archive; processed chunks are then streamed into one output CSV. The writer aligns the union of generated columns so an action-specific flag added in one chunk does not shift values in later chunks. A chunk-index JSON report records the run reports and row counts. The orchestrator uses the configured first 10% prefix for tables with known row counts and skips tables whose row count cannot be established safely.
 
 This is still an opt-in stage and does not alter the default profiling orchestrator. Since planning and statistics are chunk-local, action choices and thresholds can differ across chunks. This implementation does not yet provide dataset-global thresholds, rollback across all chunk archives, clinical approval, or a validated EHR remediation workflow. Use synthetic/de-identified fixtures, and never commit clinical data or archives to Git.
 
@@ -60,21 +60,23 @@ Median imputation remains disabled by default. To explicitly enable it for an ex
 
 ## Orchestrator integration
 
-The main orchestrator now calls the preprocessing stage after the existing profiling/quality pass for CSV-backed tables, including tables already marked complete by the profiling checkpoint. The feature is disabled by default and writes only under `outputs/preprocessing/<table>/`; it does not replace source files or change profiling results.
+The orchestrator runs preprocessing only after profiling all tables and building the semantic context/knowledge graph. For each explicitly allowlisted table, it processes only the deterministic first 10% of rows (using known MIMIC-IV v3.1 row counts or a bounded count of small files). The LLM receives aggregate profiles, schema semantics, and candidate links for the target table and directly connected tables—not source rows. The feature is disabled by default and writes only under `outputs/preprocessing/<table>/`; it does not replace source files or change profiling results.
 
 Enable it for an explicit run in PowerShell:
 
 ```powershell
 $env:TRIPPINNI_PREPROCESSING_ENABLED = "1"
-$env:TRIPPINNI_PREPROCESSING_CHUNK_SIZE = "50000"
-$env:TRIPPINNI_PREPROCESSING_MODEL = "qwen3:4b"
-$env:TRIPPINNI_PREPROCESSING_MAX_ITERATIONS = "3"
-python main.py
+$env:TRIPPINNI_PREPROCESSING_CHUNK_SIZE = "1000"
+$env:TRIPPINNI_PREPROCESSING_TABLES = "hosp_patients,hosp_admissions"
+$env:TRIPPINNI_PREPROCESSING_MODEL = "qwen3:8b"  # 32 GB system; use qwen3:4b on 8 GB
+$env:TRIPPINNI_OLLAMA_NUM_CTX = "4096"           # use 2048 on 8 GB
+$env:TRIPPINNI_PREPROCESSING_MAX_ITERATIONS = "2"
+python app.py
 ```
 
 To permit numeric median imputation, set `TRIPPINNI_PREPROCESSING_ALLOW_IMPUTATION=1` only after explicit data-owner review. It remains off by default. If the processed CSV and chunk report already exist, the orchestrator skips the preprocessing run; delete those generated outputs to force a rerun. A preprocessing error is logged and does not invalidate a successful profiling checkpoint.
 
-**Performance warning:** enabling this globally runs the planner separately for every chunk across every CSV table and scans the full source file. Do not enable it for the entire MIMIC-IV corpus as a first run. Start with one small, de-identified CSV and a small chunk size, inspect reports and outputs, then decide which tables to enable. This is still experimental and does not provide global cross-chunk thresholds or clinical validation.
+**Performance warning:** do not allowlist the entire MIMIC-IV corpus on the first run. Start with one or two tables, a 1,000-row chunk size, and two iterations. The 10% prefix can still be large for high-volume tables, and the planner is called per chunk. This remains experimental and does not provide global cross-chunk thresholds or clinical validation.
 
 ## Hardware profiles and staged testing
 
@@ -119,7 +121,7 @@ These are conservative starting values, not performance guarantees. On the 8 GB 
 3. Test preprocessing directly before running the full application:
 
    ```powershell
-   python -m preprocessing.csv_runtime .\smoke_test.csv --output-dir .\outputs\smoke_test --chunksize 5 --model $env:TRIPPINNI_PREPROCESSING_MODEL --max-iterations 2
+   python -m preprocessing.csv_runtime .\smoke_test.csv --output-dir .\outputs\smoke_test --chunksize 5 --max-rows 5 --model $env:TRIPPINNI_PREPROCESSING_MODEL --max-iterations 2
    ```
 
 4. Check output row count and source preservation:
