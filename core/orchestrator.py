@@ -302,8 +302,9 @@ class Orchestrator:
             return
 
         output_dir = config.OUTPUT_ROOT / "preprocessing" / table
-        expected_output = output_dir / f"{source_path.stem}_processed.csv"
-        expected_report = output_dir / f"{source_path.stem}_chunk_report.json"
+        source_stem = source_path.name[:-7] if source_path.name.lower().endswith(".csv.gz") else source_path.stem
+        expected_output = output_dir / f"{source_stem}_processed.csv"
+        expected_report = output_dir / f"{source_stem}_chunk_report.json"
         if expected_output.is_file() and expected_report.is_file():
             print(f"  Preprocessing already exists for {table}: {expected_output}")
             return
@@ -324,7 +325,7 @@ class Orchestrator:
             )
             return
         max_rows = max(1, int(total_rows * config.PROFILE_PREFIX_FRACTION))
-        context_metadata = self._preprocessing_context_metadata()
+        context_metadata = self._preprocessing_context_metadata(table)
         print(
             f"  Stage: LLM-guided preprocessing | source: {source_path.name} | "
             f"prefix: first {max_rows:,}/{total_rows:,} rows "
@@ -353,24 +354,38 @@ class Orchestrator:
         print(f"  Preprocessed output: {summary['output_file']}")
         print(f"  Preprocessing report: {summary['summary_report']}")
 
-    def _preprocessing_context_metadata(self) -> dict:
-        """Return aggregate schema and candidate-link metadata, never source rows."""
+    def _preprocessing_context_metadata(self, target_table: str) -> dict:
+        """Return compact metadata for this table and directly linked tables only."""
+        all_tables = self.semantic_context.get("tables", {})
+        linked_tables = {target_table}
+        candidate_edges = []
+        if self.knowledge_graph is not None:
+            graph = self.knowledge_graph.to_dict()
+            for edge in graph.get("edges", []):
+                if edge.get("relation") != "SHARED_IDENTIFIER_CANDIDATE":
+                    continue
+                endpoints = [edge.get("source", ""), edge.get("target", "")]
+                endpoint_tables = set()
+                for endpoint in endpoints:
+                    if endpoint.startswith("column:") and "." in endpoint:
+                        endpoint_tables.add(endpoint[len("column:"):].rsplit(".", 1)[0])
+                if target_table in endpoint_tables:
+                    linked_tables.update(endpoint_tables)
+                    candidate_edges.append(edge)
+
+        # Keep the prompt focused on the current table and directly linked tables.
+        selected_tables = {
+            name: all_tables[name]
+            for name in linked_tables
+            if name in all_tables
+        }
         context = {
             "context_version": self.semantic_context.get("context_version", "unknown"),
             "scope": "metadata_only_cross_table_context",
-            "tables": self.semantic_context.get("tables", {}),
-            "candidate_relationships": [],
+            "target_table": target_table,
+            "tables": selected_tables,
+            "candidate_relationships": candidate_edges,
         }
-        if self.knowledge_graph is not None:
-            graph = self.knowledge_graph.to_dict()
-            context["candidate_relationships"] = [
-                edge for edge in graph.get("edges", [])
-                if edge.get("relation") in {
-                    "SHARED_IDENTIFIER_CANDIDATE",
-                    "CANDIDATE_PRIMARY_KEY",
-                    "CANDIDATE_FOREIGN_KEY",
-                }
-            ]
         return context
 
     def _build_context_layer(self) -> None:
