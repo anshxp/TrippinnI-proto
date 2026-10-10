@@ -1,0 +1,1 @@
+"""Runtime integration placeholder for the guarded preprocessing agent.\n\nSee agent.py and DECISION_RULES.md for the current planner contract.\n"""\n
