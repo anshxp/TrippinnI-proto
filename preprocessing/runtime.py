@@ -41,7 +41,7 @@ def run_dataframe(df: pd.DataFrame, *, file_name: str, output_dir: str | Path, m
         profile=profile_dataframe(working)
         record={"run_id":run_id,"action_id":action_id,"iteration":iteration,"action":name,"module":spec_map[name].module,"status":"committed","rationale":str(decision.get("rationale","")),"parameters":decision.get("parameters",{}),"summary":result.get("summary",""),"changed_records":result.get("changed_records",0),"archived_records":result.get("archived_records",0),"details":result.get("details",{}),"before_profile":before,"after_profile":profile,"elapsed_seconds":round(time.time()-started,3)}
         reports.append(record); history.append({"iteration":iteration,"action":name,"status":"committed","summary":record["summary"]})
-        with (archive/f"{run_id}_action_log.jsonl").open("a",encoding="utf-8") as stream: stream.write(json.dumps(record,default=str)+"\\n")
+        with (archive/f"{run_id}_action_log.jsonl").open("a",encoding="utf-8") as stream: stream.write(json.dumps(record,default=str)+"\n")
     output_path=root/f"{safe_name}_processed.csv"; tmp=output_path.with_suffix(".tmp")
     working.to_csv(tmp,index=False); tmp.replace(output_path)
     report_path=root/f"{safe_name}_preprocessing_report.json"
