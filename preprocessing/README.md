@@ -1,17 +1,55 @@
-# Preprocessing
+# Preprocessing agent
 
-- agent.py: local Ollama planner and bounded iterative orchestration loop.
-- DECISION_RULES.md: initial Rule/ML/DL catalogue, transformation guardrails,
-  archive requirements, and imputation policy.
+- `agent.py`: Ollama/Qwen planner and generic guarded loop.
+- `registry.py`: allow-listed Rule and ML handlers.
+- `runtime.py`: working DataFrame/chunk runner with iterative calls, per-action logs, per-file report, and processed output.
+- `DECISION_RULES.md`: decision catalogue and clinical-data guardrails.
 
-The agent uses qwen3:4b by default (TRIPPINNI_LLM_MODEL) and calls the local
-Ollama chat API (TRIPPINNI_OLLAMA_URL, default http://localhost:11434).
-It sends profile summaries and action metadata, not complete source tables.
+## Local setup
 
-The agent is not yet wired into core/orchestrator.py. Before enabling it in the
-main pipeline, implement and test handlers that:
-1. use the existing profiling and detection APIs,
-2. write to a versioned working copy,
-3. archive removed/replaced values before mutation,
-4. validate postconditions and commit/rollback atomically, and
-5. emit file-level reports without including raw patient data in ordinary logs.
+1. Start Ollama and confirm `ollama list` includes `qwen3:4b`.
+2. Install dependencies with `pip install -r requirements.txt`.
+3. Run the runtime against a bounded DataFrame/chunk from your application:
+
+```python
+from preprocessing.runtime import run_dataframe
+
+report = run_dataframe(
+    df,  # a bounded pandas DataFrame, not an unbounded EHR table
+    file_name="example_chunk.csv",
+    output_dir="F:/TrippinnI-work/preprocessing",
+    model="qwen3:4b",
+    max_iterations=5,
+)
+print(report["report_file"])
+```
+
+The runner sends compact profile metadata and an action allow-list to the LLM,
+not the source rows. Qwen proposes one registered tool at a time. Python
+validates the tool name and parameters, executes the registered handler,
+re-profiles the returned DataFrame, and then asks Qwen for the next action.
+It writes a processed CSV, per-file JSON report, JSONL action log, and a
+separate archive for replaced values.
+
+## Initial tools
+
+- Rule: missingness report, exact duplicate report (flag-only), IQR outlier flags.
+- ML: Isolation Forest anomaly flags.
+- Median imputation is excluded by default. It can only be enabled explicitly
+  with `allow_imputation=True`; this is a prototype switch, not a clinical
+  approval workflow.
+
+The current handlers are conservative: duplicate and anomaly methods flag
+records rather than delete them. The archive currently captures cells replaced
+by median imputation; flag-only methods do not remove or overwrite source values.
+Original input DataFrames are copied before processing.
+
+## Important integration boundary
+
+This is an opt-in runner for a bounded DataFrame or chunk. It is not yet wired
+into `core/orchestrator.py` or the full chunk-streaming file writer. Do not
+pass an entire large MIMIC-IV table into memory. Next, connect the runner to
+the existing chunk reader and atomically write a versioned output per file,
+with dataset-level rollback and postcondition tests before using it on real EHR
+data. Use synthetic/de-identified test fixtures, and never commit clinical data
+or archives to Git.
