@@ -1,9 +1,8 @@
 """Chunked CSV entry point for the TrippinnI preprocessing planner.
 
 The source CSV is never modified. Each chunk is independently profiled and
-processed by the bounded runtime; processed chunks are streamed to one output.
-This is memory-bounded but chunk-local statistics (for example IQR) can differ
-between chunks, so this is a prototype workflow rather than a clinical pipeline.
+processed by the bounded runtime. Output columns are unioned across chunks.
+Chunk-local statistics can differ, so review cross-chunk consistency.
 """
 from __future__ import annotations
 
@@ -26,7 +25,7 @@ def run_csv_chunks(
     max_iterations: int = 5,
     allow_imputation: bool = False,
 ) -> dict[str, Any]:
-    """Process a CSV in bounded chunks and stream results to a single CSV."""
+    """Process CSV chunks, then stream-align their output schemas."""
     source = Path(input_path)
     destination = Path(output_dir)
     if not source.is_file():
@@ -44,6 +43,8 @@ def run_csv_chunks(
         temp_path.unlink()
 
     chunk_reports: list[dict[str, Any]] = []
+    chunk_paths: list[Path] = []
+    output_columns: list[str] = []
     total_rows = 0
     try:
         for chunk_number, chunk in enumerate(
@@ -61,13 +62,13 @@ def run_csv_chunks(
             processed_chunk = Path(report["output_file"])
             if not processed_chunk.is_file():
                 raise RuntimeError(f"Chunk {chunk_number} did not produce an output CSV")
-            output_chunk = pd.read_csv(processed_chunk, low_memory=False)
-            output_chunk.to_csv(
-                temp_path,
-                mode="a" if chunk_number > 1 else "w",
-                header=chunk_number == 1,
-                index=False,
-            )
+            # Only read headers here. Full chunk data is loaded one chunk at a time
+            # during the final streaming pass.
+            header = list(pd.read_csv(processed_chunk, nrows=0).columns)
+            for column in header:
+                if column not in output_columns:
+                    output_columns.append(column)
+            chunk_paths.append(processed_chunk)
             total_rows += len(chunk)
             chunk_reports.append({
                 "chunk": chunk_number,
@@ -77,13 +78,20 @@ def run_csv_chunks(
                 "chunk_report": report["report_file"],
             })
 
-        if not chunk_reports:
-            # Preserve the schema for a header-only CSV.
-            empty = pd.read_csv(source, nrows=0)
-            empty.to_csv(temp_path, index=False)
+        if not chunk_paths:
+            pd.read_csv(source, nrows=0).to_csv(temp_path, index=False)
+        else:
+            for i, processed_chunk in enumerate(chunk_paths):
+                output_chunk = pd.read_csv(processed_chunk, low_memory=False)
+                output_chunk = output_chunk.reindex(columns=output_columns)
+                output_chunk.to_csv(
+                    temp_path,
+                    mode="a" if i else "w",
+                    header=(i == 0),
+                    index=False,
+                )
         temp_path.replace(output_path)
     except Exception:
-        # Do not leave a partial output masquerading as a completed dataset.
         if temp_path.exists():
             temp_path.unlink()
         raise
@@ -94,12 +102,13 @@ def run_csv_chunks(
         "chunksize": chunksize,
         "chunks_processed": len(chunk_reports),
         "rows_processed": total_rows,
+        "output_columns": output_columns,
         "model": model,
         "allow_imputation": allow_imputation,
         "chunk_reports": chunk_reports,
         "note": (
-            "Actions and statistics are chunk-local. Review cross-chunk consistency "
-            "before using output for downstream analysis."
+            "Each chunk is planned independently. Learned thresholds and action "
+            "choices may vary between chunks; inspect reports before downstream use."
         ),
     }
     index_path.write_text(json.dumps(summary, indent=2, default=str), encoding="utf-8")
@@ -117,7 +126,7 @@ def main() -> None:
     parser.add_argument(
         "--allow-imputation",
         action="store_true",
-        help="Enable numeric median imputation for this run; use only with explicit review",
+        help="Enable numeric median imputation for this run; review is required",
     )
     args = parser.parse_args()
     result = run_csv_chunks(
