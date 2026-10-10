@@ -194,6 +194,8 @@ class IterativePreprocessingAgent:
                 result_record.changed_records = int(result.get("changed_records", 0))
                 result_record.archived_records = int(result.get("archived_records", 0))
                 if result_record.status == "committed":
+                    if "dataset" in result:
+                        working_dataset = result["dataset"]
                     profile = self.profile_fn(working_dataset)
                     result_record.after_profile = profile
                 else:
