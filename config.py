@@ -16,8 +16,8 @@ TEMPERATURE = 0.1
 # Chunked processing configuration
 CSV_CHUNK_SIZE = 100_000
 
-# LLM-guided preprocessing is deliberately opt-in: it scans the full source
-# file and calls the local model for each chunk. Enable only for an explicit run.
+# LLM-guided preprocessing is opt-in and row-bounded. The orchestrator uses
+# PROFILE_PREFIX_FRACTION and calls the local model for each selected chunk.
 PREPROCESSING_ENABLED = os.getenv("TRIPPINNI_PREPROCESSING_ENABLED", "0").strip().lower() in {"1", "true", "yes"}
 PREPROCESSING_CHUNK_SIZE = int(os.getenv("TRIPPINNI_PREPROCESSING_CHUNK_SIZE", "50000"))
 PREPROCESSING_MODEL = os.getenv("TRIPPINNI_PREPROCESSING_MODEL", LLM_MODEL)
