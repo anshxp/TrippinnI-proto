@@ -52,12 +52,16 @@ class OllamaPlanner:
         model: str | None = None,
         base_url: str | None = None,
         timeout_seconds: int = 180,
+        num_ctx: int | None = None,
     ) -> None:
         self.model = model or os.getenv("TRIPPINNI_LLM_MODEL", "qwen3:4b")
         self.base_url = (base_url or os.getenv(
             "TRIPPINNI_OLLAMA_URL", "http://localhost:11434"
         )).rstrip("/")
         self.timeout_seconds = timeout_seconds
+        self.num_ctx = num_ctx or int(os.getenv("TRIPPINNI_OLLAMA_NUM_CTX", "2048"))
+        if self.num_ctx < 512:
+            raise ValueError("Ollama context size must be at least 512 tokens.")
 
     def choose_action(
         self,
@@ -99,7 +103,7 @@ class OllamaPlanner:
                     {"role": "system", "content": system_prompt},
                     {"role": "user", "content": json.dumps(user_payload, default=str)},
                 ],
-                "options": {"temperature": 0.1, "num_ctx": 4096},
+                "options": {"temperature": 0.1, "num_ctx": self.num_ctx},
             },
             timeout=self.timeout_seconds,
         )
