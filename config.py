@@ -25,6 +25,8 @@ PREPROCESSING_MAX_ITERATIONS = int(os.getenv("TRIPPINNI_PREPROCESSING_MAX_ITERAT
 PREPROCESSING_ALLOW_IMPUTATION = os.getenv("TRIPPINNI_PREPROCESSING_ALLOW_IMPUTATION", "0").strip().lower() in {"1", "true", "yes"}
 # Empty allowlist means the orchestrator will not preprocess any table.
 PREPROCESSING_TABLES = {name.strip() for name in os.getenv("TRIPPINNI_PREPROCESSING_TABLES", "").split(",") if name.strip()}
+PREPROCESSING_INCLUDE_CONNECTED_TABLES = os.getenv("TRIPPINNI_PREPROCESSING_INCLUDE_CONNECTED_TABLES", "1").strip().lower() in {"1", "true", "yes"}
+PREPROCESSING_ROW_COUNT_CHUNK_SIZE = int(os.getenv("TRIPPINNI_PREPROCESSING_ROW_COUNT_CHUNK_SIZE", "100000"))
 # Conservative context sizes: 2048 for 8 GB, 4096 for 32 GB.
 OLLAMA_NUM_CTX = int(os.getenv("TRIPPINNI_OLLAMA_NUM_CTX", "2048"))
 
