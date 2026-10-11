@@ -51,14 +51,14 @@ class OllamaPlanner:
         self,
         model: str | None = None,
         base_url: str | None = None,
-        timeout_seconds: int = 180,
+        timeout_seconds: int | None = None,
         num_ctx: int | None = None,
     ) -> None:
         self.model = model or os.getenv("TRIPPINNI_LLM_MODEL", "qwen3:4b")
         self.base_url = (base_url or os.getenv(
             "TRIPPINNI_OLLAMA_URL", "http://localhost:11434"
         )).rstrip("/")
-        self.timeout_seconds = timeout_seconds
+        self.timeout_seconds = timeout_seconds or int(os.getenv("TRIPPINNI_OLLAMA_TIMEOUT_SECONDS", "90"))
         self.num_ctx = num_ctx or int(os.getenv("TRIPPINNI_OLLAMA_NUM_CTX", "2048"))
         if self.num_ctx < 512:
             raise ValueError("Ollama context size must be at least 512 tokens.")
@@ -75,7 +75,10 @@ class OllamaPlanner:
         system_prompt = (
             "You are TrippinnI's healthcare data preprocessing planner. "
             "Choose at most ONE action from the supplied allow-list per turn. "
-            "Never invent action names or parameters. Preserve clinical meaning, "
+            "The action field must exactly match one name in available_actions, " 
+            "or be stop. Relationship registration and schema registration are " 
+            "not preprocessing actions unless explicitly listed. Never invent " 
+            "action names or parameters. Preserve clinical meaning, "
             "patient/encounter links, repeated measurements, and temporal order. "
             "Do not recommend deletion, imputation, capping, or value correction "
             "unless the selected registered action explicitly supports it and "
@@ -89,8 +92,9 @@ class OllamaPlanner:
             "recent_action_history": history[-8:],
             # Aggregate profiles/schema/relationship metadata only; never raw patient rows.
             "cross_table_context_metadata": context_metadata or {},
+            "allowed_action_names": [item.name for item in actions],
             "required_output_schema": {
-                "action": "registered action name or stop",
+                "action": "one exact allowed_action_names value or stop",
                 "parameters": {},
                 "rationale": "brief evidence-based explanation",
                 "stop": False,
