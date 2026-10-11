@@ -7,6 +7,7 @@ Chunk-local statistics can differ, so review cross-chunk consistency.
 from __future__ import annotations
 
 import argparse
+import gc
 import json
 from pathlib import Path
 from typing import Any
@@ -97,13 +98,17 @@ def run_csv_chunks(
                     output_columns.append(column)
             chunk_paths.append(processed_chunk)
             total_rows += len(chunk)
+            # Keep only compact metadata in RAM. Full action histories and profiles
+            # already live in each chunk's JSON report on disk.
             chunk_reports.append({
                 "chunk": chunk_number,
                 "rows": len(chunk),
                 "run_id": report["run_id"],
-                "actions": report["actions"],
+                "action_count": len(report.get("actions", [])),
                 "chunk_report": report["report_file"],
             })
+            del chunk, report, processed_chunk, header
+            gc.collect()
 
         if not chunk_paths:
             pd.read_csv(source, nrows=0).to_csv(temp_path, index=False)
@@ -117,6 +122,8 @@ def run_csv_chunks(
                     header=(i == 0),
                     index=False,
                 )
+                del output_chunk
+                gc.collect()
         temp_path.replace(output_path)
     except Exception:
         if temp_path.exists():
