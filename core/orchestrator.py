@@ -185,7 +185,8 @@ class Orchestrator:
                     sample = downcast_dataframe(sample)
 
                     detection_started = time.monotonic()
-                    self.detection_samples[table] = sample.copy()
+                    if config.RETAIN_DETECTION_SAMPLES:
+                        self.detection_samples[table] = sample.copy()
                     result = self.quality_detector.run(
                         {table: sample},
                         report,
@@ -252,7 +253,8 @@ class Orchestrator:
                 f"  Stage: quality detection | "
                 f"sample rows: {len(detection_frame):,}"
             )
-            self.detection_samples[table] = detection_frame.copy()
+            if config.RETAIN_DETECTION_SAMPLES:
+                self.detection_samples[table] = detection_frame.copy()
             result = self.quality_detector.run(
                 {table: detection_frame},
                 self.profiles[table],
