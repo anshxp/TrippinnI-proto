@@ -52,7 +52,7 @@ Run a large CSV without loading the entire source table into RAM:
 python -m preprocessing.csv_runtime path/to/input.csv --output-dir outputs/preprocessing --chunksize 50000 --model qwen3:4b
 ```
 
-The source is read in bounded chunks and capped by an explicit row limit (--max-rows, default 5,000). Each chunk receives its own profile, planner decisions, action report, and archive; processed chunks are then streamed into one output CSV. The writer aligns the union of generated columns so an action-specific flag added in one chunk does not shift values in later chunks. A chunk-index JSON report records the run reports and row counts. The orchestrator uses the configured first 10% prefix for tables with known row counts and skips tables whose row count cannot be established safely.
+The source is read in bounded chunks and capped by an explicit row limit (--max-rows, default 5,000). Each chunk receives its own profile, planner decisions, action report, and archive; processed chunks are then streamed into one output CSV. The writer aligns the union of generated columns so an action-specific flag added in one chunk does not shift values in later chunks. A chunk-index JSON report records the run reports and row counts. The orchestrator uses the configured first 10% prefix. It uses known row counts where available; for any other CSV/CSV.GZ dataset it can count rows in bounded-memory chunks to establish the 10% boundary. This count may read the full file once, but does not retain the full table in RAM or send rows to Qwen.
 
 This is still an opt-in stage and does not alter the default profiling orchestrator. Since planning and statistics are chunk-local, action choices and thresholds can differ across chunks. This implementation does not yet provide dataset-global thresholds, rollback across all chunk archives, clinical approval, or a validated EHR remediation workflow. Use synthetic/de-identified fixtures, and never commit clinical data or archives to Git.
 
@@ -60,14 +60,17 @@ Median imputation remains disabled by default. To explicitly enable it for an ex
 
 ## Orchestrator integration
 
-The orchestrator runs preprocessing only after profiling all tables and building the semantic context/knowledge graph. For each explicitly allowlisted table, it processes only the deterministic first 10% of rows (using known MIMIC-IV v3.1 row counts or a bounded count of small files). The LLM receives aggregate profiles, schema semantics, and candidate links for the target table and directly connected tables—not source rows. The feature is disabled by default and writes only under `outputs/preprocessing/<table>/`; it does not replace source files or change profiling results.
+The orchestrator runs preprocessing only after profiling all tables and building the semantic context/knowledge graph. For each selected table, it processes only the deterministic first 10% of rows. It uses known row counts when available and otherwise counts CSV rows in bounded-memory chunks, so this also works for non-MIMIC CSV datasets. The LLM receives aggregate profiles, schema semantics, and candidate links for the target table and directly connected tables—not source rows. The feature is disabled by default and writes only under `outputs/preprocessing/<table>/`; it does not replace source files or change profiling results.
+
+Set seed table(s) explicitly. By default, the orchestrator traverses the semantic graph's `SHARED_IDENTIFIER_CANDIDATE` links and processes the connected component in stable breadth-first order. Set `TRIPPINNI_PREPROCESSING_INCLUDE_CONNECTED_TABLES=0` to process only the named seed tables. Set `TRIPPINNI_PREPROCESSING_TABLES=all` to select every discovered table (not recommended for the first run). This is dataset-agnostic for loader-supported CSV/CSV.GZ files; `app.py` itself is currently a MIMIC-specific entry point, while other datasets should use the generic `Pipeline`/loader interface.
 
 Enable it for an explicit run in PowerShell:
 
 ```powershell
 $env:TRIPPINNI_PREPROCESSING_ENABLED = "1"
 $env:TRIPPINNI_PREPROCESSING_CHUNK_SIZE = "1000"
-$env:TRIPPINNI_PREPROCESSING_TABLES = "hosp_patients,hosp_admissions"
+$env:TRIPPINNI_PREPROCESSING_TABLES = "hosp_patients"  # seed; linked tables are added by metadata graph
+$env:TRIPPINNI_PREPROCESSING_INCLUDE_CONNECTED_TABLES = "1"
 $env:TRIPPINNI_PREPROCESSING_MODEL = "qwen3:8b"  # 32 GB system; use qwen3:4b on 8 GB
 $env:TRIPPINNI_OLLAMA_NUM_CTX = "4096"           # use 2048 on 8 GB
 $env:TRIPPINNI_PREPROCESSING_MAX_ITERATIONS = "2"
@@ -80,7 +83,7 @@ To permit numeric median imputation, set `TRIPPINNI_PREPROCESSING_ALLOW_IMPUTATI
 
 ## Hardware profiles and staged testing
 
-Choose the model explicitly on each machine. Ollama may use system RAM and GPU memory, so the repository does not guess the model from installed RAM.
+Choose the model explicitly on each machine. Ollama may use system RAM and GPU memory, so the repository does not guess the model from installed RAM. The LLM receives compact per-table profiles, candidate relationship metadata, and action history only—not source rows. The source data is processed locally by Python.
 
 ### 32 GB system
 
@@ -146,8 +149,13 @@ These are conservative starting values, not performance guarantees. On the 8 GB 
 
 ### Safety and limits
 
-- Preprocessing remains disabled by default. When enabled in the orchestrator, only table names listed in `TRIPPINNI_PREPROCESSING_TABLES` are eligible; an empty allowlist means no table is preprocessed.
+- Preprocessing remains disabled by default. When enabled in the orchestrator, `TRIPPINNI_PREPROCESSING_TABLES` must contain seed table names or `all`; an empty allowlist means no table is preprocessed. With connected traversal enabled, linked tables are added based on inferred shared-identifier candidates.
 - Keep median imputation disabled for the initial tests.
 - Each chunk is planned independently. Thresholds and chosen actions can differ between chunks; this is not yet a globally consistent clinical remediation pipeline.
 - Do not commit MIMIC-IV data, processed outputs, archives, or reports to Git.
 - Successful execution and row preservation do not establish clinical validity. Review the action logs, schema changes, row counts, missingness, and flags before downstream use.
+
+
+### Scope of the current agent
+
+The LLM is a planner over the explicitly registered preprocessing actions, not an unrestricted code-writing agent. Current registered actions are missingness reporting, exact-duplicate reporting, IQR outlier flags, Isolation Forest flags, and a gated numeric median-imputation action. Existing profiling and quality detectors in the main pipeline run separately; they are not all exposed as LLM-selectable preprocessing actions yet. Imputation remains disabled unless explicitly approved. Do not describe this prototype as automatically applying every algorithm in the repository.
