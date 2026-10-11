@@ -13,7 +13,7 @@ import psutil
 
 import config
 from core.loader import LoaderManager
-from preprocessing.csv_runtime import run_csv_chunks
+from preprocessing.csv_runtime import count_csv_rows, run_csv_chunks
 from core.memory_utils import downcast_dataframe, release
 from profiling.profiler import DatasetProfilerEngine
 from quality.detector import QualityDetector
@@ -277,11 +277,17 @@ class Orchestrator:
         # Preprocess only after all selected table profiles and cross-table metadata
         # are available. Raw rows are never sent to the planner.
         if config.PREPROCESSING_ENABLED and hasattr(loader, "get_dataframe_chunks"):
-            for table in tables:
-                if table in config.PREPROCESSING_TABLES:
-                    self._run_preprocessing_if_enabled(
-                        table, self._get_source_path(loader, table), loader=loader
-                    )
+            selected_tables = self._preprocessing_table_order(tables)
+            if not selected_tables:
+                print(
+                    "Preprocessing enabled, but no valid seed tables were selected. "
+                    "Set TRIPPINNI_PREPROCESSING_TABLES to one or more table names, "
+                    "or use 'all' to select all discovered CSV tables."
+                )
+            for table in selected_tables:
+                self._run_preprocessing_if_enabled(
+                    table, self._get_source_path(loader, table), loader=loader
+                )
 
         print()
         print("=" * 78)
@@ -291,9 +297,6 @@ class Orchestrator:
     def _run_preprocessing_if_enabled(self, table: str, source_path: Path, *, loader=None) -> None:
         """Run opt-in preprocessing after profiling without modifying source data."""
         if not config.PREPROCESSING_ENABLED:
-            return
-        if table not in config.PREPROCESSING_TABLES:
-            print(f"  Preprocessing skipped for {table}: not listed in TRIPPINNI_PREPROCESSING_TABLES")
             return
         source_path = Path(source_path)
         if not source_path.is_file() or "".join(source_path.suffixes[-2:]).lower() not in {".csv", ".csv.gz"}:
@@ -318,10 +321,23 @@ class Orchestrator:
             except (OSError, ValueError):
                 total_rows = 0
         if total_rows <= 0:
-            print(
-                f"  Preprocessing skipped for {table}: row count is unknown; "
-                "cannot enforce the configured 10% prefix safely"
-            )
+            try:
+                print(
+                    f"  Counting rows in {source_path.name} with bounded memory "
+                    "to determine the 10% prefix (no rows are sent to Qwen)."
+                )
+                total_rows = count_csv_rows(
+                    source_path,
+                    chunksize=config.PREPROCESSING_ROW_COUNT_CHUNK_SIZE,
+                )
+            except (OSError, ValueError, pd.errors.ParserError) as exc:
+                print(
+                    f"  Preprocessing skipped for {table}: could not determine "
+                    f"row count safely: {type(exc).__name__}: {exc}"
+                )
+                return
+        if total_rows <= 0:
+            print(f"  Preprocessing skipped for {table}: source has no data rows")
             return
         max_rows = max(1, int(total_rows * config.PROFILE_PREFIX_FRACTION))
         context_metadata = self._preprocessing_context_metadata(table)
@@ -352,6 +368,59 @@ class Orchestrator:
         )
         print(f"  Preprocessed output: {summary['output_file']}")
         print(f"  Preprocessing report: {summary['summary_report']}")
+
+    def _preprocessing_table_order(self, available_tables: list[str]) -> list[str]:
+        """Select seed tables and optionally traverse their metadata-linked component.
+
+        'all' or '*' selects every discovered table. Otherwise the configured
+        table names are seeds. When connected-table traversal is enabled, a
+        breadth-first traversal follows only shared-identifier candidate edges
+        already inferred by the semantic context layer.
+        """
+        available = set(available_tables)
+        configured = {name.strip() for name in config.PREPROCESSING_TABLES}
+        if not configured:
+            return []
+        if configured & {"all", "*"}:
+            seeds = set(available)
+        else:
+            seeds = configured & available
+            missing = sorted(configured - available)
+            if missing:
+                print(f"  Warning: preprocessing seed table(s) not found: {', '.join(missing)}")
+        if not seeds:
+            return []
+
+        adjacency: dict[str, set[str]] = {name: set() for name in available}
+        if config.PREPROCESSING_INCLUDE_CONNECTED_TABLES and self.knowledge_graph is not None:
+            graph = self.knowledge_graph.to_dict()
+            for edge in graph.get("edges", []):
+                if edge.get("relation") != "SHARED_IDENTIFIER_CANDIDATE":
+                    continue
+                endpoint_tables = set()
+                for endpoint in (edge.get("source", ""), edge.get("target", "")):
+                    if endpoint.startswith("column:") and "." in endpoint:
+                        name = endpoint[len("column:"):].rsplit(".", 1)[0]
+                        if name in available:
+                            endpoint_tables.add(name)
+                for name in endpoint_tables:
+                    adjacency[name].update(endpoint_tables - {name})
+
+        # Stable BFS order preserves reproducibility and makes linked files
+        # adjacent in the run sequence. A selected seed's connected component
+        # is processed once, even when several seeds overlap.
+        order: list[str] = []
+        seen: set[str] = set()
+        queue = sorted(seeds)
+        while queue:
+            current = queue.pop(0)
+            if current in seen:
+                continue
+            seen.add(current)
+            order.append(current)
+            if config.PREPROCESSING_INCLUDE_CONNECTED_TABLES:
+                queue.extend(sorted(adjacency.get(current, set()) - seen))
+        return order
 
     def _preprocessing_context_metadata(self, target_table: str) -> dict:
         """Return compact metadata for this table and directly linked tables only."""
