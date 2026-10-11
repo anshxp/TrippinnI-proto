@@ -342,12 +342,13 @@ class Orchestrator:
         if total_rows <= 0:
             print(f"  Preprocessing skipped for {table}: source has no data rows")
             return
-        max_rows = max(1, int(total_rows * config.PROFILE_PREFIX_FRACTION))
+        prefix_rows = max(1, int(total_rows * config.PROFILE_PREFIX_FRACTION))
+        max_rows = min(prefix_rows, config.PREPROCESSING_MAX_ROWS)
         context_metadata = self._preprocessing_context_metadata(table)
         print(
             f"  Stage: LLM-guided preprocessing | source: {source_path.name} | "
             f"prefix: first {max_rows:,}/{total_rows:,} rows "
-            f"({config.PROFILE_PREFIX_FRACTION:.0%})"
+            f"({max_rows / total_rows:.3%} of source; hard cap {config.PREPROCESSING_MAX_ROWS:,} rows)"
         )
         try:
             summary = run_csv_chunks(
