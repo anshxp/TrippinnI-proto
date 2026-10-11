@@ -16,6 +16,25 @@ import pandas as pd
 from preprocessing.runtime import run_dataframe
 
 
+
+def count_csv_rows(input_path: str | Path, *, chunksize: int = 100_000) -> int:
+    """Count data rows with bounded memory for any supported CSV/CSV.GZ.
+
+    This reads the file to establish an exact 10% prefix boundary, but it does
+    not retain the table in memory and does not send row data to the LLM.
+    Known row counts should be used when available to avoid a second scan.
+    """
+    source = Path(input_path)
+    if not source.is_file():
+        raise FileNotFoundError(f"Input CSV does not exist: {source}")
+    if chunksize <= 0:
+        raise ValueError("chunksize must be greater than zero")
+    total = 0
+    for chunk in pd.read_csv(source, chunksize=chunksize, low_memory=False):
+        total += len(chunk)
+    return total
+
+
 def run_csv_chunks(
     input_path: str | Path,
     *,
