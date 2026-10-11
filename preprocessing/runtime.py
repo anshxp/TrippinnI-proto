@@ -24,11 +24,39 @@ def run_dataframe(df: pd.DataFrame, *, file_name: str, output_dir: str | Path, m
     profile=profile_dataframe(working)
     history=[]; reports=[]; run_id=uuid.uuid4().hex
     for iteration in range(1,max_iterations+1):
-        decision=planner.choose_action(profile,specs,history,context_metadata=context_metadata)
+        try:
+            decision=planner.choose_action(profile,specs,history,context_metadata=context_metadata)
+        except Exception as exc:
+            # A local-model timeout or malformed response must not abort the
+            # dataset run. Preserve this chunk unchanged and write a diagnostic.
+            reports.append({
+                "iteration": iteration,
+                "action": None,
+                "status": "planner_failed",
+                "error": f"{type(exc).__name__}: {exc}",
+                "before_profile": profile,
+            })
+            history.append({"iteration": iteration, "action": None, "status": "planner_failed"})
+            break
         name=decision.get("action")
+        if not isinstance(name, str):
+            reports.append({"iteration": iteration, "action": None, "status": "invalid_decision", "error": "Planner action must be a string."})
+            break
         if decision.get("stop") is True or name=="stop": break
-        if name not in spec_map: raise ValueError(f"LLM selected unregistered action: {name!r}")
-        if not isinstance(decision.get("parameters",{}),dict): raise ValueError("LLM parameters must be an object")
+        if name not in spec_map:
+            reports.append({
+                "iteration": iteration,
+                "action": name,
+                "status": "unregistered_action_blocked",
+                "error": f"LLM selected unregistered action: {name!r}; no action was executed.",
+                "allowed_actions": sorted(spec_map),
+                "before_profile": profile,
+            })
+            history.append({"iteration": iteration, "action": name, "status": "unregistered_action_blocked"})
+            break
+        if not isinstance(decision.get("parameters",{}),dict):
+            reports.append({"iteration": iteration, "action": name, "status": "invalid_parameters", "error": "LLM parameters must be an object.", "before_profile": profile})
+            break
         if any(x["action"]==name and x["status"]=="committed" for x in history):
             history.append({"iteration":iteration,"action":name,"status":"repeated_action_blocked"}); break
         started=time.time(); action_id=uuid.uuid4().hex; before=profile
@@ -45,7 +73,7 @@ def run_dataframe(df: pd.DataFrame, *, file_name: str, output_dir: str | Path, m
     output_path=root/f"{safe_name}_processed.csv"; tmp=output_path.with_suffix(".tmp")
     working.to_csv(tmp,index=False); tmp.replace(output_path)
     report_path=root/f"{safe_name}_preprocessing_report.json"
-    report={"run_id":run_id,"file_name":file_name,"iterations":len(reports),"model":model,"context_metadata_tables": list((context_metadata or {}).get("tables", {}).keys()),"final_profile":profile,"actions":reports,"output_file":str(output_path),"archive_dir":str(archive)}
+    report={"run_id":run_id,"file_name":file_name,"iterations":len(reports),"model":model,"planner_failures":sum(1 for item in reports if str(item.get("status","")).startswith("planner") or item.get("status")=="unregistered_action_blocked"),"context_metadata_tables": list((context_metadata or {}).get("tables", {}).keys()),"final_profile":profile,"actions":reports,"output_file":str(output_path),"archive_dir":str(archive)}
     report_path.write_text(json.dumps(report,indent=2,default=str),encoding="utf-8")
     report["report_file"]=str(report_path)
     return report
