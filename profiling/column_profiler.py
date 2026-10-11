@@ -31,6 +31,7 @@ class ColumnProfiler:
                 is_numeric = pd.api.types.is_numeric_dtype(series)
                 column_state = {
                     "dtype": str(series.dtype),
+                    "mixed_types": False,
                     "is_numeric": is_numeric,
                     "rows": 0,
                     "null_count": 0,
@@ -41,6 +42,9 @@ class ColumnProfiler:
                     "statistics": self.statistics.start_streaming(is_numeric),
                 }
                 state["columns"][column] = column_state
+
+            if str(series.dtype) != column_state["dtype"]:
+                column_state["mixed_types"] = True
 
             column_state["rows"] += len(series)
             column_state["null_count"] += int(series.isna().sum())
@@ -71,18 +75,21 @@ class ColumnProfiler:
             non_null = rows - column_state["null_count"]
             exact = not column_state["unique_overflow"]
             unique_count = len(column_state["unique_values"]) if exact else self.MAX_UNIQUE_VALUES + 1
-            sample = pd.Series(column_state["sample"], dtype=column_state["dtype"])
+            # Keep retained clinical values as objects: a numeric dtype inferred
+            # from an early CSV chunk must not reject later text-coded results.
+            sample = pd.Series(column_state["sample"], dtype="object")
+            effective_dtype = "object" if column_state["mixed_types"] else column_state["dtype"]
             semantic_type = self.datatype.infer_streaming(
                 column,
-                column_state["dtype"],
+                effective_dtype,
                 sample,
                 non_null,
                 unique_count,
             )
-            validation_type = self.datatype.validation_type(column_state["dtype"], semantic_type)
+            validation_type = self.datatype.validation_type(effective_dtype, semantic_type)
             columns[column] = {
                 "name": column,
-                "pandas_dtype": column_state["dtype"],
+                "pandas_dtype": effective_dtype,
                 "semantic_type": semantic_type,
                 "validation_type": validation_type,
                 "memory_usage": int(column_state["memory_usage"]),
