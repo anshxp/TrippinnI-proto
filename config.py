@@ -23,6 +23,8 @@ RETAIN_DETECTION_SAMPLES = os.getenv("TRIPPINNI_RETAIN_DETECTION_SAMPLES", "0").
 # PROFILE_PREFIX_FRACTION and calls the local model for each selected chunk.
 PREPROCESSING_ENABLED = os.getenv("TRIPPINNI_PREPROCESSING_ENABLED", "0").strip().lower() in {"1", "true", "yes"}
 PREPROCESSING_CHUNK_SIZE = int(os.getenv("TRIPPINNI_PREPROCESSING_CHUNK_SIZE", "1000"))
+# Independent hard cap: preprocessing must not inherit the much larger profiling prefix.
+PREPROCESSING_MAX_ROWS = int(os.getenv("TRIPPINNI_PREPROCESSING_MAX_ROWS", "5000"))
 PREPROCESSING_MODEL = os.getenv("TRIPPINNI_PREPROCESSING_MODEL", LLM_MODEL)
 PREPROCESSING_MAX_ITERATIONS = int(os.getenv("TRIPPINNI_PREPROCESSING_MAX_ITERATIONS", "3"))
 PREPROCESSING_ALLOW_IMPUTATION = os.getenv("TRIPPINNI_PREPROCESSING_ALLOW_IMPUTATION", "0").strip().lower() in {"1", "true", "yes"}
