@@ -14,7 +14,10 @@ MAX_NEW_TOKENS = 512
 TEMPERATURE = 0.1
 
 # Chunked processing configuration
-CSV_CHUNK_SIZE = 100_000
+# Smaller default chunk lowers peak DataFrame memory on RAM-constrained systems.
+CSV_CHUNK_SIZE = int(os.getenv("TRIPPINNI_CSV_CHUNK_SIZE", "10000"))
+# Keep in-memory detection samples only when explicitly requested; reports are persisted to disk.
+RETAIN_DETECTION_SAMPLES = os.getenv("TRIPPINNI_RETAIN_DETECTION_SAMPLES", "0").strip().lower() in {"1", "true", "yes"}
 
 # LLM-guided preprocessing is opt-in and row-bounded. The orchestrator uses
 # PROFILE_PREFIX_FRACTION and calls the local model for each selected chunk.
