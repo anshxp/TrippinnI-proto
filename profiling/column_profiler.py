@@ -71,7 +71,13 @@ class ColumnProfiler:
             non_null = rows - column_state["null_count"]
             exact = not column_state["unique_overflow"]
             unique_count = len(column_state["unique_values"]) if exact else self.MAX_UNIQUE_VALUES + 1
-            sample = pd.Series(column_state["sample"], dtype=column_state["dtype"])
+
+            # Do not force the first chunk's dtype onto the accumulated sample.
+            # Later chunks can contain valid clinical strings (for example,
+            # ">100,000 CFU/mL") even when the first chunk was inferred as float.
+            # Let pandas preserve the mixed values rather than raising during
+            # Series construction.
+            sample = pd.Series(column_state["sample"])
             semantic_type = self.datatype.infer_streaming(
                 column,
                 column_state["dtype"],
