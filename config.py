@@ -5,17 +5,28 @@ from __future__ import annotations
 import os
 from pathlib import Path
 
+import psutil
+
+# Hardware profile: choose conservative defaults from installed system RAM.
+# Explicit environment variables always override these defaults. RAM is only a
+# heuristic; GPU VRAM, quantization, and other running applications also matter.
+SYSTEM_RAM_GB = psutil.virtual_memory().total / (1024 ** 3)
+IS_HIGH_MEMORY_SYSTEM = SYSTEM_RAM_GB >= 24
+DEFAULT_LLM_MODEL = "qwen3:8b" if IS_HIGH_MEMORY_SYSTEM else "qwen3:4b"
+DEFAULT_OLLAMA_NUM_CTX = 4096 if IS_HIGH_MEMORY_SYSTEM else 2048
+DEFAULT_CSV_CHUNK_SIZE = 10000 if IS_HIGH_MEMORY_SYSTEM else 2000
+DEFAULT_MAX_ROWS_FOR_DETECTION = 10000 if IS_HIGH_MEMORY_SYSTEM else 5000
+
 # Local LLM configuration (Ollama).
-# Run: ollama pull qwen3:4b
-# Set per machine: qwen3:8b on 32 GB, qwen3:4b on 8 GB. Explicit override avoids unreliable RAM/GPU guesses.
-LLM_MODEL = os.getenv("TRIPPINNI_LLM_MODEL", "qwen3:4b")
+# 32 GB machine -> Qwen3 8B; 8 GB machine -> Qwen3 4B.
+# Override with TRIPPINNI_LLM_MODEL if RAM is shared or GPU limits require it.
+LLM_MODEL = os.getenv("TRIPPINNI_LLM_MODEL", DEFAULT_LLM_MODEL)
 OLLAMA_BASE_URL = os.getenv("TRIPPINNI_OLLAMA_URL", "http://localhost:11434")
 MAX_NEW_TOKENS = 512
 TEMPERATURE = 0.1
 
-# Chunked processing configuration
-# Smaller default chunk lowers peak DataFrame memory on RAM-constrained systems.
-CSV_CHUNK_SIZE = int(os.getenv("TRIPPINNI_CSV_CHUNK_SIZE", "10000"))
+# Chunked processing configuration; lower default on the 8 GB machine.
+CSV_CHUNK_SIZE = int(os.getenv("TRIPPINNI_CSV_CHUNK_SIZE", str(DEFAULT_CSV_CHUNK_SIZE)))
 # Keep in-memory detection samples only when explicitly requested; reports are persisted to disk.
 RETAIN_DETECTION_SAMPLES = os.getenv("TRIPPINNI_RETAIN_DETECTION_SAMPLES", "0").strip().lower() in {"1", "true", "yes"}
 
@@ -33,7 +44,7 @@ PREPROCESSING_TABLES = {name.strip() for name in os.getenv("TRIPPINNI_PREPROCESS
 PREPROCESSING_INCLUDE_CONNECTED_TABLES = os.getenv("TRIPPINNI_PREPROCESSING_INCLUDE_CONNECTED_TABLES", "1").strip().lower() in {"1", "true", "yes"}
 PREPROCESSING_ROW_COUNT_CHUNK_SIZE = int(os.getenv("TRIPPINNI_PREPROCESSING_ROW_COUNT_CHUNK_SIZE", "100000"))
 # Conservative context sizes: 2048 for 8 GB, 4096 for 32 GB.
-OLLAMA_NUM_CTX = int(os.getenv("TRIPPINNI_OLLAMA_NUM_CTX", "2048"))
+OLLAMA_NUM_CTX = int(os.getenv("TRIPPINNI_OLLAMA_NUM_CTX", str(DEFAULT_OLLAMA_NUM_CTX)))
 
 # Prototype profiling configuration
 # Process only the deterministic first fraction of each source table.
@@ -47,7 +58,7 @@ PROFILE_PREFIX_FRACTION = 0.10
 CSV_ROW_COUNT_FALLBACK_MAX_MB = 10
 
 # Quality detectors still receive a bounded in-memory sample.
-MAX_ROWS_FOR_DETECTION = 10_000
+MAX_ROWS_FOR_DETECTION = int(os.getenv("TRIPPINNI_MAX_ROWS_FOR_DETECTION", str(DEFAULT_MAX_ROWS_FOR_DETECTION)))
 DETECTION_SAMPLE_SEED = 42
 
 # Approximate duplicate detection (RapidFuzz)
