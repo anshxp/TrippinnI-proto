@@ -16,6 +16,8 @@ from typing import Any, Callable
 
 import requests
 
+import config
+
 
 @dataclass(frozen=True)
 class ActionSpec:
@@ -45,7 +47,7 @@ class ActionResult:
 
 
 class OllamaPlanner:
-    """Small local planner client; default model is Qwen3 4B."""
+    """Small local planner client using the configured hardware-profile model."""
 
     def __init__(
         self,
@@ -54,12 +56,12 @@ class OllamaPlanner:
         timeout_seconds: int | None = None,
         num_ctx: int | None = None,
     ) -> None:
-        self.model = model or os.getenv("TRIPPINNI_LLM_MODEL", "qwen3:4b")
+        self.model = model or os.getenv("TRIPPINNI_LLM_MODEL", config.LLM_MODEL)
         self.base_url = (base_url or os.getenv(
             "TRIPPINNI_OLLAMA_URL", "http://localhost:11434"
         )).rstrip("/")
         self.timeout_seconds = timeout_seconds or int(os.getenv("TRIPPINNI_OLLAMA_TIMEOUT_SECONDS", "90"))
-        self.num_ctx = num_ctx or int(os.getenv("TRIPPINNI_OLLAMA_NUM_CTX", "2048"))
+        self.num_ctx = num_ctx or int(os.getenv("TRIPPINNI_OLLAMA_NUM_CTX", str(config.OLLAMA_NUM_CTX)))
         if self.num_ctx < 512:
             raise ValueError("Ollama context size must be at least 512 tokens.")
 
