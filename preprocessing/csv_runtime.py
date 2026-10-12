@@ -14,6 +14,7 @@ from typing import Any
 
 import pandas as pd
 
+import config
 from preprocessing.runtime import run_dataframe
 
 
@@ -41,7 +42,7 @@ def run_csv_chunks(
     *,
     output_dir: str | Path,
     chunksize: int = 50_000,
-    model: str = "qwen3:4b",
+    model: str | None = None,
     max_iterations: int = 5,
     allow_imputation: bool = False,
     max_rows: int | None = 5_000,
@@ -82,7 +83,7 @@ def run_csv_chunks(
                 chunk,
                 file_name=chunk_name,
                 output_dir=chunk_root / chunk_name,
-                model=model,
+                model=model or config.PREPROCESSING_MODEL,
                 max_iterations=max_iterations,
                 allow_imputation=allow_imputation,
                 context_metadata=context_metadata,
@@ -158,7 +159,7 @@ def main() -> None:
     parser.add_argument("input_csv", help="Path to source CSV (source remains unchanged)")
     parser.add_argument("--output-dir", default="outputs/preprocessing")
     parser.add_argument("--chunksize", type=int, default=50_000)
-    parser.add_argument("--model", default="qwen3:4b")
+    parser.add_argument("--model", default=config.PREPROCESSING_MODEL)
     parser.add_argument("--max-iterations", type=int, default=5)
     parser.add_argument("--max-rows", type=int, default=5_000, help="Maximum prefix rows to process; unbounded scans are disabled")
     parser.add_argument(
