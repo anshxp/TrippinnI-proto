@@ -122,6 +122,13 @@ MIMIC_V31_ROW_COUNTS = {
     "icu_procedureevents": 808_706,
 }
 
+# Module 3 remediation is opt-in; do not mutate EHR data by default.
+REMEDIATION_ENABLED = os.getenv("TRIPPINNI_REMEDIATION_ENABLED", "0").strip().lower() in {"1", "true", "yes"}
+REMEDIATION_IMPUTE_NUMERIC = os.getenv("TRIPPINNI_REMEDIATION_IMPUTE_NUMERIC", "0").strip().lower() in {"1", "true", "yes"}
+REMEDIATION_IMPUTE_CATEGORICAL = os.getenv("TRIPPINNI_REMEDIATION_IMPUTE_CATEGORICAL", "0").strip().lower() in {"1", "true", "yes"}
+REMEDIATION_REMOVE_EXACT_DUPLICATES = os.getenv("TRIPPINNI_REMEDIATION_REMOVE_EXACT_DUPLICATES", "0").strip().lower() in {"1", "true", "yes"}
+REMEDIATION_ENABLE_ENCODING = os.getenv("TRIPPINNI_REMEDIATION_ENABLE_ENCODING", "0").strip().lower() in {"1", "true", "yes"}
+
 # Local NVMe workspace (F:) for the prototype.
 # Override with environment variables if the dataset/workspace lives elsewhere.
 DATA_ROOT = Path(
