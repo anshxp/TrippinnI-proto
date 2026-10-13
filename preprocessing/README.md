@@ -7,7 +7,7 @@
 
 ## Local setup
 
-1. Start Ollama and confirm `ollama list` includes `qwen3:4b`.
+1. Start Ollama and confirm `ollama list` includes the model selected by the hardware profile: Qwen3 8B on systems with at least 24 GiB RAM, otherwise Qwen3 4B. Set `TRIPPINNI_LLM_MODEL` to override.
 2. Install dependencies with `pip install -r requirements.txt`.
 3. Run the runtime against a bounded DataFrame/chunk from your application:
 
@@ -83,7 +83,7 @@ To permit numeric median imputation, set `TRIPPINNI_PREPROCESSING_ALLOW_IMPUTATI
 
 ## Hardware profiles and staged testing
 
-Choose the model explicitly on each machine. Ollama may use system RAM and GPU memory, so the repository does not guess the model from installed RAM. The LLM receives compact per-table profiles, candidate relationship metadata, and action history only—not source rows. The source data is processed locally by Python.
+The configuration chooses a conservative default from detected system RAM: Qwen3 8B and a 4096-token context when RAM is at least 24 GiB; otherwise Qwen3 4B and a 2048-token context. The default profiling chunk is 10,000 rows on the higher-memory profile and 2,000 rows on the lower-memory profile. Explicit environment variables override these defaults. This is a RAM heuristic, not a guarantee of fit: GPU VRAM, quantization, memory pressure, and other running applications still affect performance. The LLM receives compact per-table profiles, candidate relationship metadata, and action history only—not source rows. The source data is processed locally by Python.
 
 ### 32 GB system
 
