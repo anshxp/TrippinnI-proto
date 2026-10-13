@@ -60,6 +60,19 @@ def run_dataframe(df: pd.DataFrame, *, file_name: str, output_dir: str | Path, m
             break
         if any(x["action"]==name and x["status"]=="committed" for x in history):
             history.append({"iteration":iteration,"action":name,"status":"repeated_action_blocked"}); break
+        # Fail closed: this runtime has no explicit approval-token/workflow, so
+        # actions marked requires_approval must never execute through the LLM path.
+        spec = spec_map[name]
+        if spec.requires_approval:
+            reports.append({
+                "iteration": iteration,
+                "action": name,
+                "status": "approval_required",
+                "error": "Action requires explicit approval; this runtime has no approval workflow, so no changes were made.",
+                "before_profile": profile,
+            })
+            history.append({"iteration": iteration, "action": name, "status": "approval_required"})
+            break
         started=time.time(); action_id=uuid.uuid4().hex; before=profile
         result=handlers[name](working,parameters=decision.get("parameters",{}),archive_dir=archive,run_id=run_id,action_id=action_id)
         if result.get("status")!="committed":
