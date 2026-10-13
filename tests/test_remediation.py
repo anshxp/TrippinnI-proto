@@ -29,3 +29,35 @@ def test_duplicate_removal_is_opt_in():
     policy = RemediationPolicy(enabled=True, remove_exact_duplicates=False)
     result = RemediationExecutor(policy).run({"demo": df}, {"demo": {}})
     assert len(result.dataset["demo"]) == 2
+
+
+def test_runtime_blocks_imputation_without_approval(monkeypatch, tmp_path):
+    from preprocessing import runtime
+
+    class FakePlanner:
+        def __init__(self, **kwargs):
+            pass
+
+        def choose_action(self, profile, actions, history, context_metadata=None):
+            return {
+                "action": "median_imputation",
+                "parameters": {"column": "value"},
+                "rationale": "test approval gate",
+                "stop": False,
+            }
+
+    monkeypatch.setattr(runtime, "OllamaPlanner", FakePlanner)
+    df = pd.DataFrame({"subject_id": [1, 2], "value": [10.0, None]})
+
+    report = runtime.run_dataframe(
+        df,
+        file_name="synthetic.csv",
+        output_dir=tmp_path,
+        allow_imputation=True,
+        max_iterations=1,
+    )
+
+    assert report["actions"][0]["status"] == "approval_required"
+    assert pd.isna(df.loc[1, "value"])
+    written = pd.read_csv(report["output_file"])
+    assert pd.isna(written.loc[1, "value"])
