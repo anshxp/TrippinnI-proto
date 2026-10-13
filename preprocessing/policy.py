@@ -18,7 +18,7 @@ class RemediationPolicy:
     protect_datetime_columns: bool = True
     max_numeric_imputation_missing_fraction: float = 0.50
     explicit_unit_map: dict[str, dict[str, str]] = field(default_factory=dict)
-    protected_issue_types: set[str] = field(default_factory=lambda: {"clinical_range", "plausibility", "rule_violation})
+    protected_issue_types: set[str] = field(default_factory=lambda: {"clinical_range", "plausibility", "rule_violation"})
 
     def allows(self, action: str) -> bool:
         return {
