@@ -1,7 +1,7 @@
 """Extended, bounded-memory metadata used by preprocessing recommendation models.
 
-Estimates derived from samples are explicitly marked as sampled. This module does
-not infer clinical truth, missingness mechanisms, or schema rules without metadata.
+Sample-derived metrics are explicitly marked. This module does not infer clinical
+truth, missingness mechanisms, or schema rules without external evidence.
 """
 from __future__ import annotations
 
@@ -34,10 +34,21 @@ def _safe_float(value: Any) -> float | None:
     return result if np.isfinite(result) else None
 
 
-def _string_lengths(values: pd.Series) -> dict:
+def _string_lengths(values: pd.Series, applicable: bool) -> dict:
+    if not applicable:
+        return {
+            "string_length_applicable": False,
+            "string_length_count": None,
+            "string_length_mean": None,
+            "string_length_median": None,
+            "string_length_std": None,
+            "string_length_min": None,
+            "string_length_max": None,
+        }
     strings = values.dropna().astype(str)
     if strings.empty:
         return {
+            "string_length_applicable": True,
             "string_length_count": 0,
             "string_length_mean": None,
             "string_length_median": None,
@@ -47,6 +58,7 @@ def _string_lengths(values: pd.Series) -> dict:
         }
     lengths = strings.str.len()
     return {
+        "string_length_applicable": True,
         "string_length_count": int(len(lengths)),
         "string_length_mean": _safe_float(lengths.mean()),
         "string_length_median": _safe_float(lengths.median()),
@@ -69,9 +81,6 @@ def _date_format_consistency(values: pd.Series) -> dict:
         }
 
     sample = strings.head(5000)
-    name_like_date = False
-    # Date candidates are identified from observed values; column-name context
-    # is added by profile_series below.
     labels = []
     for value in sample:
         label = "other"
@@ -82,16 +91,21 @@ def _date_format_consistency(values: pd.Series) -> dict:
         labels.append(label)
 
     counts = pd.Series(labels).value_counts()
-    recognized = int(len(labels) - counts.get("other", 0))
-    dominant = str(counts.index[0]) if len(counts) else None
-    consistency = float(counts.iloc[0] / len(labels)) if len(counts) else None
+    recognized_counts = counts.drop(labels=["other"], errors="ignore")
+    recognized = int(recognized_counts.sum())
+    dominant = str(recognized_counts.idxmax()) if not recognized_counts.empty else None
+    consistency = (
+        float(recognized_counts.max() / len(labels))
+        if not recognized_counts.empty and len(labels)
+        else None
+    )
 
     parsed = pd.to_datetime(sample, errors="coerce", format="mixed")
     parse_success = float(parsed.notna().mean()) if len(parsed) else None
     return {
         "date_format_candidate": bool(recognized > 0 or (parse_success or 0) >= 0.5),
         "date_format_consistency": _safe_float(consistency),
-        "date_format_pattern_count": int(sum(label != "other" for label in counts.index)),
+        "date_format_pattern_count": int(len(recognized_counts)),
         "dominant_date_format": dominant,
         "date_parse_success_ratio": _safe_float(parse_success),
         "date_parse_failure_ratio": _safe_float(1 - parse_success) if parse_success is not None else None,
@@ -109,30 +123,35 @@ def profile_extended_series(column_name: str, series: pd.Series, sampled: bool =
         "non_null_sample_size": int(len(non_null)),
     }
 
-    # Statistical shape and IQR outliers. Outliers are only statistical flags;
-    # they are not automatically errors or safe candidates for removal.
+    # Statistical outliers are flags, not proof of errors or safe deletion.
     numeric = pd.to_numeric(non_null, errors="coerce")
     numeric_success = int(numeric.notna().sum())
+    numeric_ratio = numeric_success / max(len(non_null), 1) if len(non_null) else None
     numeric_candidate = pd.api.types.is_numeric_dtype(series) or (
-        len(non_null) > 0 and numeric_success / len(non_null) >= 0.8
+        len(non_null) > 0 and numeric_ratio is not None and numeric_ratio >= 0.8
     )
     if numeric_candidate and numeric_success:
-        numeric = numeric.dropna().astype(float)
-        q1, q3 = numeric.quantile([0.25, 0.75])
+        numeric_values = numeric.dropna().astype(float)
+        q1, q3 = numeric_values.quantile([0.25, 0.75])
         iqr = float(q3 - q1)
         low, high = float(q1 - 1.5 * iqr), float(q3 + 1.5 * iqr)
-        outlier_mask = (numeric < low) | (numeric > high)
+        outlier_mask = (numeric_values < low) | (numeric_values > high)
         output.update({
-            "skewness": _safe_float(numeric.skew()) if len(numeric) >= 3 else None,
+            "skewness": _safe_float(numeric_values.skew()) if len(numeric_values) >= 3 else None,
             "outlier_method": "IQR_1.5x",
             "outlier_lower_bound": _safe_float(low),
             "outlier_upper_bound": _safe_float(high),
             "outlier_count": int(outlier_mask.sum()),
             "outlier_ratio": _safe_float(outlier_mask.mean()),
-            "numeric_parse_success_ratio": _safe_float(numeric_success / max(len(non_null), 1)),
-            "numeric_parse_failure_ratio": _safe_float(1 - numeric_success / max(len(non_null), 1)),
+            "numeric_parse_applicable": not pd.api.types.is_numeric_dtype(series),
+            "numeric_parse_success_ratio": _safe_float(numeric_ratio),
+            "numeric_parse_failure_ratio": _safe_float(1 - numeric_ratio),
         })
     else:
+        numeric_parse_applicable = (
+            not pd.api.types.is_numeric_dtype(series)
+            and any(token in name for token in ("value", "result", "amount", "count", "score", "rate"))
+        )
         output.update({
             "skewness": None,
             "outlier_method": None,
@@ -140,16 +159,27 @@ def profile_extended_series(column_name: str, series: pd.Series, sampled: bool =
             "outlier_upper_bound": None,
             "outlier_count": None,
             "outlier_ratio": None,
-            "numeric_parse_success_ratio": _safe_float(numeric_success / max(len(non_null), 1)) if len(non_null) else None,
-            "numeric_parse_failure_ratio": _safe_float(1 - numeric_success / max(len(non_null), 1)) if len(non_null) else None,
+            "numeric_parse_applicable": numeric_parse_applicable,
+            "numeric_parse_success_ratio": _safe_float(numeric_ratio) if numeric_parse_applicable else None,
+            "numeric_parse_failure_ratio": _safe_float(1 - numeric_ratio) if numeric_parse_applicable and numeric_ratio is not None else None,
         })
 
-    output.update(_string_lengths(non_null))
+    is_string_like = (
+        pd.api.types.is_object_dtype(series)
+        or pd.api.types.is_string_dtype(series)
+        or isinstance(series.dtype, pd.CategoricalDtype)
+    )
+    output.update(_string_lengths(non_null, is_string_like))
 
-    # Only treat date parsing as a meaningful validation signal when the field
-    # name or observed values suggest a date/time field.
     date_context = any(token in name for token in DATE_NAME_TOKENS)
-    date_meta = _date_format_consistency(non_null)
+    date_meta = _date_format_consistency(non_null) if is_string_like else {
+        "date_format_candidate": False,
+        "date_format_consistency": None,
+        "date_format_pattern_count": None,
+        "dominant_date_format": None,
+        "date_parse_success_ratio": None,
+        "date_parse_failure_ratio": None,
+    }
     if date_context or date_meta["date_format_candidate"]:
         output.update(date_meta)
         output["date_parse_applicable"] = True
@@ -164,8 +194,7 @@ def profile_extended_series(column_name: str, series: pd.Series, sampled: bool =
             "date_parse_applicable": False,
         })
 
-    # Unit values can be described only when a unit/UOM field is present.
-    # We do not infer measurement units from numeric values or column names.
+    # Dominant unit share is descriptive; true consistency requires measurement linkage.
     if any(token in name for token in UNIT_NAME_TOKENS):
         unit_values = non_null.astype(str).str.strip().str.casefold()
         counts = unit_values.value_counts()
@@ -173,7 +202,7 @@ def profile_extended_series(column_name: str, series: pd.Series, sampled: bool =
             "unit_metadata_available": True,
             "unit_unique_count": int(unit_values.nunique()),
             "unit_dominant_share": _safe_float(counts.iloc[0] / len(unit_values)) if len(unit_values) else None,
-            "unit_consistency": _safe_float(counts.iloc[0] / len(unit_values)) if len(unit_values) else None,
+            "unit_consistency_assessment": "requires_measurement_linkage",
             "unit_values_sample": [str(v) for v in counts.index[:20]],
         })
     else:
@@ -181,12 +210,11 @@ def profile_extended_series(column_name: str, series: pd.Series, sampled: bool =
             "unit_metadata_available": False,
             "unit_unique_count": None,
             "unit_dominant_share": None,
-            "unit_consistency": None,
+            "unit_consistency_assessment": "unavailable",
             "unit_values_sample": [],
         })
 
-    # These require external schema/use-case evidence. Null means unavailable,
-    # not zero and not a claim that the column is valid.
+    # External evidence is required. Null means unavailable, not zero/valid.
     output.update({
         "schema_available": False,
         "schema_violation_count": None,
