@@ -350,3 +350,32 @@ Deployment/reference comparison is available through QualityDetector.run(dataset
 The detector performs deterministic bootstrap resampling of the evaluated sample and measures sensitivity of the overall missingness rate. The result reports bootstrap mean, standard deviation, and range. This is a data-quality stability signal, not a full causal or model-performance robustness analysis.
 
 All thresholds are configurable in config.py. These dimensions are evaluated on the bounded detection sample when the normal MIMIC-IV pipeline is used; they should therefore be interpreted as sample-level evidence rather than exact full-table population estimates.
+
+
+## Extended metadata and preprocessing model dataset
+
+Column profiling now includes an `extended` metadata object with:
+- numeric skewness and IQR-based outlier count/ratio (statistical flags only);
+- string length summaries for string-like columns;
+- candidate numeric and datetime parse-success/failure ratios;
+- observed date-format consistency and distinct recognized format patterns;
+- descriptive unit-value counts when a unit/UOM column exists;
+- explicit availability flags for schema constraints, trusted clinical ranges, intended use, and source-similarity assessment.
+
+Streaming extended statistics use a bounded sample and mark `statistics_sampled`; they are estimates, not exact full-table statistics. The profiler does not infer clinical validity, missingness mechanism, trusted ranges, or intended analytical use without external evidence. Unit-value diversity alone is not proof of inconsistent units; measurement linkage is required.
+
+After running the normal profiler, generate candidate issue feature rows and a separate label template:
+
+```bash
+python -m ml.generate_preprocessing_dataset \
+  --reports-dir outputs/reports/profiling \
+  --context-path outputs/reports/context/healthcare_context.json \
+  --output-dir outputs/training
+```
+
+Outputs:
+- `outputs/training/preprocessing_features_unlabeled.csv`: one row per profiled column and candidate issue;
+- `outputs/training/preprocessing_labels_template.csv`: annotation template for issue/action labels;
+- `outputs/training/preprocessing_feature_schema.json`: feature schema and issue counts.
+
+Candidate issue rows are generated from observable profile evidence; they are not action labels. The target action is intentionally blank. Do not train the Random Forest until labels are validated using explicit preprocessing policy, controlled corruption experiments with known ground truth, or qualified review. Keep table/column names for lineage but exclude them from model features to reduce dataset-specific leakage.
