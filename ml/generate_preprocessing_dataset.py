@@ -10,7 +10,6 @@ from __future__ import annotations
 import argparse
 import csv
 import json
-import math
 from pathlib import Path
 from typing import Any
 
@@ -21,12 +20,6 @@ IDENTITY_FIELDS = {
     "table_name",
     "column_name",
     "profile_report",
-    "semantic_type",
-    "pandas_dtype",
-    "validation_type",
-    "candidate_primary_key",
-    "candidate_foreign_key",
-    "semantic_role",
     "target_action",
     "label_status",
     "label_source",
@@ -38,9 +31,9 @@ def _flatten(prefix: str, value: Any, output: dict[str, Any]) -> None:
         for key, nested in value.items():
             _flatten(f"{prefix}_{key}" if prefix else str(key), nested, output)
     elif isinstance(value, (list, tuple, set)):
-        # Keep lists out of the tabular feature matrix. Store stable counts and
-        # JSON summaries for audit; these can be feature-engineered later.
         output[f"{prefix}_count"] = len(value)
+        # Retained in the export for auditability; JSON strings are excluded
+        # from the default model feature list below.
         output[f"{prefix}_json"] = json.dumps(
             list(value), ensure_ascii=False, sort_keys=True, default=str
         )
@@ -108,15 +101,11 @@ def build_feature_rows(reports_dir: Path, context_path: Path | None = None) -> l
                 "label_source": "",
             }
 
-            # Column fields plus nested statistics and newly added extended
-            # metadata are retained in the feature export.
             for key, value in column.items():
                 if key in {"name", "semantic_type", "pandas_dtype", "validation_type"}:
                     continue
                 _flatten(key, value, row)
 
-            # Table-level context is repeated per column so models can use
-            # dataset size/completeness without needing raw table identifiers.
             row.update(dataset_flat)
 
             semantic = context_columns.get(str(column_name), {})
@@ -126,8 +115,7 @@ def build_feature_rows(reports_dir: Path, context_path: Path | None = None) -> l
             row["semantic_roles_count"] = len(roles) if isinstance(roles, list) else None
             row["semantic_roles_json"] = json.dumps(roles, ensure_ascii=False, default=str)
 
-            # Features requiring external evidence remain explicit nulls rather
-            # than being silently filled with zero.
+            # External-evidence features remain null when unavailable.
             row.setdefault("extended_schema_violation_ratio", None)
             row.setdefault("extended_trusted_range_violation_ratio", None)
             row.setdefault("extended_intended_use", None)
@@ -162,20 +150,26 @@ def write_outputs(rows: list[dict], output_dir: Path) -> tuple[Path, Path, Path]
     annotations.to_csv(labels_path, index=False, columns=annotation_columns)
 
     excluded = sorted(IDENTITY_FIELDS)
-    feature_columns = [column for column in frame.columns if column not in excluded]
+    # Preserve semantic/dtype/key features, but exclude identifiers and
+    # serialized list payloads from the default numeric/categorical matrix.
+    feature_columns = [
+        column for column in frame.columns
+        if column not in excluded and not column.endswith("_json")
+    ]
     schema = {
         "schema_version": "1.0",
         "source": "TrippinnI profiling JSON reports",
         "row_grain": "one row per profiled column",
         "row_count": int(len(frame)),
         "feature_columns": feature_columns,
-        "excluded_from_model_features": excluded,
+        "excluded_from_model_features": excluded + ["all *_json columns"],
         "target_column": "target_action",
         "label_status": "unlabelled; do not train until target_action values are validated",
         "null_handling": "Null means unavailable/not applicable; do not blindly replace all nulls with zero.",
         "notes": [
             "Some extended statistics are estimates from a bounded sample.",
             "Table and column names are retained for lineage but excluded from default model features.",
+            "Semantic type, physical dtype, validation type, and candidate-key flags are retained as features.",
             "Categorical features require encoding in a scikit-learn preprocessing pipeline.",
             "Schema violations and intended use require external schema or workflow metadata.",
             "The feature table does not itself constitute labelled training data.",
