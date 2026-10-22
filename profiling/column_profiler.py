@@ -2,13 +2,14 @@ import pandas as pd
 
 from profiling.statistics import StatisticsProfiler
 from profiling.datatype_profiler import DatatypeProfiler
+from profiling.extended_metadata import profile_extended_series
 
 
 class ColumnProfiler:
     """Profiles columns while keeping streaming state bounded."""
 
     MAX_UNIQUE_VALUES = 5000
-    SAMPLE_SIZE = 100
+    SAMPLE_SIZE = 5000
 
     def __init__(self):
         self.statistics = StatisticsProfiler()
@@ -38,6 +39,7 @@ class ColumnProfiler:
                     "unique_values": set(),
                     "unique_overflow": False,
                     "sample": [],
+                    "sample_seen": 0,
                     "statistics": self.statistics.start_streaming(is_numeric),
                 }
                 state["columns"][column] = column_state
@@ -58,11 +60,44 @@ class ColumnProfiler:
                         column_state["unique_overflow"] = True
                         break
 
-            remaining = self.SAMPLE_SIZE - len(column_state["sample"])
-            if remaining > 0:
-                column_state["sample"].extend(values.iloc[:remaining].tolist())
-
+            self._update_sample(column_state, values)
             self.statistics.update_streaming(column_state["statistics"], series)
+
+    def _update_sample(self, column_state: dict, values: pd.Series) -> None:
+        """Maintain a bounded, approximate reservoir sample for extended features."""
+        if values.empty:
+            return
+        sample = column_state["sample"]
+        capacity = self.SAMPLE_SIZE
+        seen_before = column_state["sample_seen"]
+
+        if len(sample) < capacity:
+            take = min(capacity - len(sample), len(values))
+            sample.extend(values.iloc[:take].tolist())
+            values = values.iloc[take:]
+            column_state["sample_seen"] += take
+            seen_before += take
+
+        if values.empty:
+            return
+
+        # Approximate vectorized reservoir replacement, avoiding a Python loop
+        # over every value in very large clinical tables.
+        n = len(values)
+        total_seen = seen_before + n
+        replace_count = min(capacity, int(round(n * capacity / max(total_seen, 1))))
+        if replace_count > 0 and len(sample) == capacity:
+            incoming = values.sample(
+                n=min(replace_count, n),
+                random_state=42 + int(total_seen % 1_000_003),
+            ).tolist()
+            slots = pd.Series(range(capacity)).sample(
+                n=len(incoming),
+                random_state=17 + int(total_seen % 1_000_003),
+            ).tolist()
+            for slot, value in zip(slots, incoming):
+                sample[int(slot)] = value
+        column_state["sample_seen"] = total_seen
 
     def finalize_streaming(self, state: dict) -> dict:
         columns = {}
@@ -70,13 +105,12 @@ class ColumnProfiler:
             rows = column_state["rows"]
             non_null = rows - column_state["null_count"]
             exact = not column_state["unique_overflow"]
-            unique_count = len(column_state["unique_values"]) if exact else self.MAX_UNIQUE_VALUES + 1
+            unique_count = (
+                len(column_state["unique_values"])
+                if exact
+                else self.MAX_UNIQUE_VALUES + 1
+            )
 
-            # Do not force the first chunk's dtype onto the accumulated sample.
-            # Later chunks can contain valid clinical strings (for example,
-            # ">100,000 CFU/mL") even when the first chunk was inferred as float.
-            # Let pandas preserve the mixed values rather than raising during
-            # Series construction.
             sample = pd.Series(column_state["sample"])
             semantic_type = self.datatype.infer_streaming(
                 column,
@@ -85,7 +119,9 @@ class ColumnProfiler:
                 non_null,
                 unique_count,
             )
-            validation_type = self.datatype.validation_type(column_state["dtype"], semantic_type)
+            validation_type = self.datatype.validation_type(
+                column_state["dtype"], semantic_type
+            )
             columns[column] = {
                 "name": column,
                 "pandas_dtype": column_state["dtype"],
@@ -96,10 +132,15 @@ class ColumnProfiler:
                 "unique_values_exact": exact,
                 "cardinality_ratio": round(unique_count / max(non_null, 1), 6),
                 "null_count": int(column_state["null_count"]),
-                "null_percentage": round(column_state["null_count"] / max(rows, 1) * 100, 2),
+                "null_percentage": round(
+                    column_state["null_count"] / max(rows, 1) * 100, 2
+                ),
                 "all_null": bool(rows > 0 and column_state["null_count"] == rows),
                 "statistics": self.statistics.finalize_streaming(
                     column_state["statistics"], rows
+                ),
+                "extended": profile_extended_series(
+                    column, sample, sampled=(column_state["sample_seen"] > len(sample))
                 ),
             }
         return columns
@@ -128,4 +169,5 @@ class ColumnProfiler:
             "null_percentage": round(float(series.isna().mean() * 100), 2),
             "all_null": bool(len(series) > 0 and series.isna().all()),
             "statistics": self.statistics.profile(series),
+            "extended": profile_extended_series(column_name, series, sampled=False),
         }
