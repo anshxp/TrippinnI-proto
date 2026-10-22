@@ -19,6 +19,7 @@ IDENTITY_FIELDS = {
     "table_name",
     "column_name",
     "profile_report",
+    "issue_evidence",
     "target_action",
     "label_status",
     "label_source",
