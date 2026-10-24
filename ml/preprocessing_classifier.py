@@ -69,8 +69,22 @@ def _make_pipeline(X: pd.DataFrame, random_state: int = 42) -> Pipeline:
     return Pipeline([("preprocess", prep), ("classifier", model)])
 
 
-def train(labels_path: Path, model_path: Path, min_rows_per_class: int = 5) -> dict:
-    frame = pd.read_csv(labels_path, keep_default_na=True)
+def train(labels_path: Path, model_path: Path, features_path: Path | None = None, min_rows_per_class: int = 5) -> dict:
+    labels = pd.read_csv(labels_path, keep_default_na=True)
+    # Annotation templates contain labels and lineage, not model features. Join them
+    # to the matching profiling feature rows before fitting.
+    if features_path is None:
+        features_path = labels_path.with_name("preprocessing_features_unlabeled.csv")
+    features_frame = pd.read_csv(features_path, keep_default_na=True)
+    join_keys = ["table_name", "column_name", "profile_report", "issue_type"]
+    missing_keys = [key for key in join_keys if key not in labels.columns or key not in features_frame.columns]
+    if missing_keys:
+        raise ValueError(f"Cannot join labels to feature rows; missing keys: {missing_keys}")
+    if labels.duplicated(join_keys).any() or features_frame.duplicated(join_keys).any():
+        raise ValueError("Duplicate join keys found; each table/column/report/issue row must be unique.")
+    frame = labels.merge(features_frame, on=join_keys, how="inner", suffixes=("_label", ""), validate="one_to_one")
+    if frame.empty:
+        raise ValueError("No label rows matched feature rows. Generate both files from the same profiling run.")
     required = {TARGET, "label_status", "label_source"}
     missing = required - set(frame.columns)
     if missing:
@@ -126,6 +140,7 @@ def main() -> None:
     sub = parser.add_subparsers(dest="command", required=True)
     train_parser = sub.add_parser("train", help="Train only from reviewed, validated action labels")
     train_parser.add_argument("--labels", type=Path, default=Path("outputs/training/preprocessing_labels_template.csv"))
+    train_parser.add_argument("--features", type=Path, default=Path("outputs/training/preprocessing_features_unlabeled.csv"))
     train_parser.add_argument("--model", type=Path, default=Path("outputs/models/preprocessing_random_forest.joblib"))
     train_parser.add_argument("--min-rows-per-class", type=int, default=5)
     predict_parser = sub.add_parser("predict", help="Recommend actions for a feature CSV")
@@ -135,7 +150,7 @@ def main() -> None:
     predict_parser.add_argument("--min-confidence", type=float, default=DEFAULT_MIN_CONFIDENCE)
     args = parser.parse_args()
     if args.command == "train":
-        result = train(args.labels, args.model, args.min_rows_per_class)
+        result = train(args.labels, args.model, args.features, args.min_rows_per_class)
     else:
         result = predict(args.features, args.model, args.output, args.min_confidence)
     print(json.dumps(result, indent=2, default=str))
