@@ -52,7 +52,7 @@ class Orchestrator:
         # so you can watch RSS stay bounded across a real 10GB run
         # instead of taking it on faith.
         self._process = psutil.Process()
-        self._checkpoint_version = 4
+        self._checkpoint_version = 5
 
     ##################################################################
 
@@ -132,7 +132,7 @@ class Orchestrator:
                 if total_rows > 0:
                     print(
                         f"  Estimated data rows: {total_rows:,} "
-                        f"(MIMIC-IV v3.1 reference row count)"
+                        f"(loader-provided or configured row count)"
                     )
                 else:
                     print("  Estimated data rows: unavailable")
