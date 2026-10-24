@@ -379,3 +379,32 @@ Outputs:
 - `outputs/training/preprocessing_feature_schema.json`: feature schema and issue counts.
 
 Candidate issue rows are generated from observable profile evidence; they are not action labels. The target action is intentionally blank. Do not train the Random Forest until labels are validated using explicit preprocessing policy, controlled corruption experiments with known ground truth, or qualified review. Keep table/column names for lineage but exclude them from model features to reduce dataset-specific leakage.
+
+
+## Random Forest preprocessing recommendation classifier
+
+The Random Forest is a recommendation layer after profiling and candidate-issue generation. It predicts a preprocessing action from profiled features; it does not execute transformations. The predicted action must pass deterministic policy/rule validation and clinical-context checks before execution. Low-confidence predictions are routed to review.
+
+Training is intentionally blocked unless each row has a non-empty `target_action`, `label_status=validated`, and a non-empty `label_source`. Use labels derived from approved preprocessing policy, controlled corruption experiments with known ground truth, or qualified review. Do not treat heuristic issue detection as a target action label.
+
+Train after completing the label template:
+
+```bash
+python -m ml.preprocessing_classifier train \
+  --labels outputs/training/preprocessing_labels_template.csv \
+  --model outputs/models/preprocessing_random_forest.joblib
+```
+
+Each action class must have at least five validated examples by default. The trainer uses a scikit-learn preprocessing pipeline for numeric imputation and categorical one-hot encoding. This minimum is only a guardrail, not evidence of adequate statistical power or model validity.
+
+Generate action recommendations from the unlabeled feature table:
+
+```bash
+python -m ml.preprocessing_classifier predict \
+  --features outputs/training/preprocessing_features_unlabeled.csv \
+  --model outputs/models/preprocessing_random_forest.joblib \
+  --output outputs/training/preprocessing_recommendations.csv \
+  --min-confidence 0.65
+```
+
+Predictions below the threshold are marked `REVIEW_REQUIRED`. The reported top-class score is not a calibrated clinical probability. Validate performance on held-out data split by patient/source where appropriate, assess class-wise precision/recall and calibration, and inspect subgroup performance before relying on recommendations. Never automatically delete or cap a clinical outlier solely because it is statistically unusual.
