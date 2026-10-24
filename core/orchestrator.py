@@ -692,8 +692,13 @@ class Orchestrator:
 
     @staticmethod
     def _get_mimic_row_count(table: str) -> int:
-        """Return the known MIMIC-IV v3.1 row count for a table."""
-        return int(config.MIMIC_V31_ROW_COUNTS.get(table.lower(), 0))
+        """Compatibility shim; row counts must be loader- or source-derived.
+
+        The legacy method name is retained for internal callers, but it no
+        longer contains dataset-specific table mappings. Callers fall back to
+        a generic loader row-count method or report the count as unavailable.
+        """
+        return 0
 
     ##################################################################
 
