@@ -1,84 +1,86 @@
+"""Dataset-agnostic CLI entry point for TrippinnI."""
+
+from __future__ import annotations
+
+import argparse
 from pathlib import Path
 
-from config import DATA_ROOT
 from core.pipeline import Pipeline
 from profiling.visualization import ReportVisualizer
 
 
-def resolve_mimic_root() -> Path:
-    """Find the MIMIC-IV version directory below the configured data root."""
-    direct = DATA_ROOT
-    candidates = []
-    for hosp_dir in direct.rglob("hosp"):
-        icu_dir = hosp_dir.parent / "icu"
-        if icu_dir.is_dir():
-            candidates.append(hosp_dir.parent)
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description="Profile a dataset, detect quality issues, build context, and generate reports."
+    )
+    parser.add_argument(
+        "--dataset-type",
+        required=True,
+        help="Registered loader type (for example: csv, json, or a registered domain adapter).",
+    )
+    parser.add_argument(
+        "--dataset-path",
+        required=True,
+        type=Path,
+        help="Path to a file or directory supported by the selected loader.",
+    )
+    parser.add_argument(
+        "--skip-visualization",
+        action="store_true",
+        help="Run the pipeline without attempting report visualization.",
+    )
+    return parser.parse_args()
 
-    unique_candidates = sorted({path.resolve() for path in candidates})
-    if not unique_candidates:
-        raise FileNotFoundError(
-            "Could not find a MIMIC-IV dataset under the configured data root. "
-            "Expected a directory containing both 'hosp' and 'icu'."
-        )
-    if len(unique_candidates) > 1:
-        paths = "\n".join(f"- {path}" for path in unique_candidates)
-        raise RuntimeError(
-            "Found multiple MIMIC-IV dataset roots:\n" + paths
-        )
-    return unique_candidates[0]
+
+def main() -> int:
+    args = parse_args()
+    dataset_path = args.dataset_path.expanduser().resolve()
+    if not dataset_path.exists():
+        raise FileNotFoundError(f"Dataset path does not exist: {dataset_path}")
+    if not args.dataset_type.strip():
+        raise ValueError("--dataset-type must not be empty")
+
+    pipeline = Pipeline()
+    orchestrator = pipeline.run(
+        dataset_type=args.dataset_type.strip().lower(),
+        dataset_path=dataset_path,
+    )
+
+    print("\\n" + "=" * 60)
+    print("Dataset summary")
+    print("=" * 60)
+    tables = orchestrator.get_tables()
+    print(f"Dataset path: {dataset_path}")
+    print(f"Loader type: {args.dataset_type}")
+    print(f"Discovered tables: {len(tables)}")
+
+    for table, profile in orchestrator.get_profiles().items():
+        dataset = profile.get("dataset", {})
+        print(f"\\n{table}")
+        print("  shape:", dataset.get("shape", (dataset.get("rows"), dataset.get("columns"))))
+        print("  missing %:", dataset.get("missing_percentage", "unavailable"))
+
+    if orchestrator.knowledge_graph is not None:
+        print("\\nContext graph")
+        print("  nodes:", len(orchestrator.knowledge_graph.nodes))
+        print("  edges:", len(orchestrator.knowledge_graph.edges))
+
+    print("\\nQuality detection summary")
+    for table, result in orchestrator.get_quality_results().items():
+        print(f"  {table}: {result.total_issues} issue(s)")
+        print("    by detector:", result.detector_summary())
+        print("    by severity:", result.severity_summary())
+
+    if not args.skip_visualization:
+        print("\\nVisualization")
+        try:
+            for name, path in ReportVisualizer().generate().items():
+                print(f"  {name}: {path}")
+        except (FileNotFoundError, OSError, ValueError) as exc:
+            print(f"  Visualization skipped: {type(exc).__name__}: {exc}")
+
+    return 0
 
 
-pipeline = Pipeline()
-dataset_path = resolve_mimic_root()
-print(f"Using MIMIC-IV dataset root: {dataset_path}")
-
-pipeline.run(dataset_type="mimic", dataset_path=dataset_path)
-orchestrator = pipeline.orchestrator
-
-print()
-print("=" * 60)
-print("Loaded Tables")
-print("=" * 60)
-for table in orchestrator.get_tables():
-    print(table)
-
-print()
-print("=" * 60)
-print("Profiling Summary")
-print("=" * 60)
-for table, profile in orchestrator.get_profiles().items():
-    print()
-    print(table)
-    print("  shape:", profile["dataset"]["shape"])
-    print("  missing %:", profile["dataset"]["missing_percentage"])
-
-print()
-print("=" * 60)
-print("Healthcare Context Summary")
-print("=" * 60)
-if orchestrator.knowledge_graph is not None:
-    print("  graph nodes:", len(orchestrator.knowledge_graph.nodes))
-    print("  graph edges:", len(orchestrator.knowledge_graph.edges))
-print("  persisted report: outputs/reports/context/healthcare_context.json")
-
-print()
-print("=" * 60)
-print("Quality Detection Summary")
-print("=" * 60)
-for table, result in orchestrator.get_quality_results().items():
-    print()
-    print(table)
-    print("  total issues:", result.total_issues)
-    print("  by detector:", result.detector_summary())
-    print("  by severity:", result.severity_summary())
-
-print()
-print("=" * 60)
-print("Visualization")
-print("=" * 60)
-try:
-    generated = ReportVisualizer().generate()
-    for name, path in generated.items():
-        print(f"  {name}: {path}")
-except FileNotFoundError as exc:
-    print(f"  Visualization skipped: {exc}")
+if __name__ == "__main__":
+    raise SystemExit(main())
