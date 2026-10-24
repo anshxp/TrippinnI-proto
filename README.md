@@ -350,3 +350,61 @@ Deployment/reference comparison is available through QualityDetector.run(dataset
 The detector performs deterministic bootstrap resampling of the evaluated sample and measures sensitivity of the overall missingness rate. The result reports bootstrap mean, standard deviation, and range. This is a data-quality stability signal, not a full causal or model-performance robustness analysis.
 
 All thresholds are configurable in config.py. These dimensions are evaluated on the bounded detection sample when the normal MIMIC-IV pipeline is used; they should therefore be interpreted as sample-level evidence rather than exact full-table population estimates.
+
+
+## Extended metadata and preprocessing model dataset
+
+Column profiling now includes an `extended` metadata object with:
+- numeric skewness and IQR-based outlier count/ratio (statistical flags only);
+- string length summaries for string-like columns;
+- candidate numeric and datetime parse-success/failure ratios;
+- observed date-format consistency and distinct recognized format patterns;
+- descriptive unit-value counts when a unit/UOM column exists;
+- explicit availability flags for schema constraints, trusted clinical ranges, intended use, and source-similarity assessment.
+
+Streaming extended statistics use a bounded sample and mark `statistics_sampled`; they are estimates, not exact full-table statistics. The profiler does not infer clinical validity, missingness mechanism, trusted ranges, or intended analytical use without external evidence. Unit-value diversity alone is not proof of inconsistent units; measurement linkage is required.
+
+After running the normal profiler, generate candidate issue feature rows and a separate label template:
+
+```bash
+python -m ml.generate_preprocessing_dataset \
+  --reports-dir outputs/reports/profiling \
+  --context-path outputs/reports/context/healthcare_context.json \
+  --output-dir outputs/training
+```
+
+Outputs:
+- `outputs/training/preprocessing_features_unlabeled.csv`: one row per profiled column and candidate issue;
+- `outputs/training/preprocessing_labels_template.csv`: annotation template for issue/action labels;
+- `outputs/training/preprocessing_feature_schema.json`: feature schema and issue counts.
+
+Candidate issue rows are generated from observable profile evidence; they are not action labels. The target action is intentionally blank. Do not train the Random Forest until labels are validated using explicit preprocessing policy, controlled corruption experiments with known ground truth, or qualified review. Keep table/column names for lineage but exclude them from model features to reduce dataset-specific leakage.
+
+
+## Random Forest preprocessing recommendation classifier
+
+The Random Forest is a recommendation layer after profiling and candidate-issue generation. It predicts a preprocessing action from profiled features; it does not execute transformations. The predicted action must pass deterministic policy/rule validation and clinical-context checks before execution. Low-confidence predictions are routed to review.
+
+Training is intentionally blocked unless each row has a non-empty `target_action`, `label_status=validated`, and a non-empty `label_source`. Use labels derived from approved preprocessing policy, controlled corruption experiments with known ground truth, or qualified review. Do not treat heuristic issue detection as a target action label.
+
+Train after completing the label template:
+
+```bash
+python -m ml.preprocessing_classifier train \
+  --labels outputs/training/preprocessing_labels_template.csv \
+  --model outputs/models/preprocessing_random_forest.joblib
+```
+
+Each action class must have at least five validated examples by default. The trainer uses a scikit-learn preprocessing pipeline for numeric imputation and categorical one-hot encoding. This minimum is only a guardrail, not evidence of adequate statistical power or model validity.
+
+Generate action recommendations from the unlabeled feature table:
+
+```bash
+python -m ml.preprocessing_classifier predict \
+  --features outputs/training/preprocessing_features_unlabeled.csv \
+  --model outputs/models/preprocessing_random_forest.joblib \
+  --output outputs/training/preprocessing_recommendations.csv \
+  --min-confidence 0.65
+```
+
+Predictions below the threshold are marked `REVIEW_REQUIRED`. The reported top-class score is not a calibrated clinical probability. Validate performance on held-out data split by patient/source where appropriate, assess class-wise precision/recall and calibration, and inspect subgroup performance before relying on recommendations. Never automatically delete or cap a clinical outlier solely because it is statistically unusual.
