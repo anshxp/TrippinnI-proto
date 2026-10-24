@@ -82,7 +82,8 @@ def train(labels_path: Path, model_path: Path, features_path: Path | None = None
         raise ValueError(f"Cannot join labels to feature rows; missing keys: {missing_keys}")
     if labels.duplicated(join_keys).any() or features_frame.duplicated(join_keys).any():
         raise ValueError("Duplicate join keys found; each table/column/report/issue row must be unique.")
-    frame = labels.merge(features_frame, on=join_keys, how="inner", suffixes=("_label", ""), validate="one_to_one")
+    label_columns = join_keys + [TARGET, "label_status", "label_source", "reviewer_notes"]
+    frame = labels[label_columns].merge(features_frame, on=join_keys, how="inner", validate="one_to_one")
     if frame.empty:
         raise ValueError("No label rows matched feature rows. Generate both files from the same profiling run.")
     required = {TARGET, "label_status", "label_source"}
