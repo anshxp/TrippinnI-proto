@@ -83,7 +83,15 @@ def train(labels_path: Path, model_path: Path, features_path: Path | None = None
     if labels.duplicated(join_keys).any() or features_frame.duplicated(join_keys).any():
         raise ValueError("Duplicate join keys found; each table/column/report/issue row must be unique.")
     label_columns = join_keys + [TARGET, "label_status", "label_source", "reviewer_notes"]
-    frame = labels[label_columns].merge(features_frame, on=join_keys, how="inner", validate="one_to_one")
+    # The feature exporter carries blank label placeholders for annotation. Drop those
+    # before joining so reviewed labels remain authoritative and do not become suffixed.
+    feature_label_fields = [TARGET, "label_status", "label_source", "reviewer_notes"]
+    features_for_join = features_frame.drop(
+        columns=[column for column in feature_label_fields if column in features_frame.columns]
+    )
+    frame = labels[label_columns].merge(
+        features_for_join, on=join_keys, how="inner", validate="one_to_one"
+    )
     if frame.empty:
         raise ValueError("No label rows matched feature rows. Generate both files from the same profiling run.")
     required = {TARGET, "label_status", "label_source"}
