@@ -7,7 +7,7 @@ from ml.preprocessing_classifier import train
 def test_training_refuses_unvalidated_labels_and_joins_feature_table(tmp_path):
     keys = {
         "table_name": ["labs"] * 10,
-        "column_name": ["value"] * 10,
+        "column_name": [f"value_{i}" for i in range(10)],
         "profile_report": ["labs_profile.json"] * 10,
         "issue_type": ["missing_values"] * 10,
     }
