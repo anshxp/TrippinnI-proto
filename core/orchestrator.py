@@ -115,11 +115,17 @@ class Orchestrator:
                 file_size_mb = source_path.stat().st_size / (1024 ** 2)
 
                 if total_rows <= 0 and hasattr(loader, "get_row_count"):
-                    if file_size_mb <= config.CSV_ROW_COUNT_FALLBACK_MAX_MB:
-                        total_rows = loader.get_row_count(
-                            table,
-                            max_file_size_mb=config.CSV_ROW_COUNT_FALLBACK_MAX_MB,
-                        )
+                    # No dataset-specific row counts are assumed. Count via
+                    # bounded-memory chunks; for compressed MIMIC files this
+                    # requires one full read before the profiling prefix pass.
+                    print(
+                        "  Row count unavailable; counting rows with bounded "
+                        "memory before applying the 10% prefix."
+                    )
+                    total_rows = loader.get_row_count(
+                        table,
+                        max_file_size_mb=None,
+                    )
 
                 print()
                 print("-" * 78)
