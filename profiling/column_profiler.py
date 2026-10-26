@@ -1,3 +1,5 @@
+import random
+
 import pandas as pd
 
 from profiling.statistics import StatisticsProfiler
@@ -5,7 +7,7 @@ from profiling.datatype_profiler import DatatypeProfiler
 
 
 class ColumnProfiler:
-    """Profiles columns while keeping streaming state bounded."""
+    """Profile columns incrementally without retaining complete columns."""
 
     MAX_UNIQUE_VALUES = 5000
     SAMPLE_SIZE = 100
@@ -31,13 +33,16 @@ class ColumnProfiler:
                 is_numeric = pd.api.types.is_numeric_dtype(series)
                 column_state = {
                     "dtype": str(series.dtype),
+                    "dtype_kinds": {self._dtype_kind(series)},
                     "is_numeric": is_numeric,
+                    "numeric_parse_failures": 0,
                     "rows": 0,
                     "null_count": 0,
                     "memory_usage": 0,
                     "unique_values": set(),
                     "unique_overflow": False,
                     "sample": [],
+                    "sample_seen": 0,
                     "statistics": self.statistics.start_streaming(is_numeric),
                 }
                 state["columns"][column] = column_state
@@ -45,7 +50,12 @@ class ColumnProfiler:
             column_state["rows"] += len(series)
             column_state["null_count"] += int(series.isna().sum())
             column_state["memory_usage"] += int(series.memory_usage(deep=True))
+            column_state["dtype_kinds"].add(self._dtype_kind(series))
             values = series.dropna()
+
+            if column_state["is_numeric"]:
+                parsed = pd.to_numeric(values, errors="coerce")
+                column_state["numeric_parse_failures"] += int(parsed.isna().sum())
 
             if not column_state["unique_overflow"]:
                 for value in values:
@@ -58,49 +68,90 @@ class ColumnProfiler:
                         column_state["unique_overflow"] = True
                         break
 
-            remaining = self.SAMPLE_SIZE - len(column_state["sample"])
-            if remaining > 0:
-                column_state["sample"].extend(values.iloc[:remaining].tolist())
+            # Reservoir sample values across the whole stream; do not let the
+            # first chunk determine semantic inference.
+            for value in values.tolist():
+                column_state["sample_seen"] += 1
+                if len(column_state["sample"]) < self.SAMPLE_SIZE:
+                    column_state["sample"].append(value)
+                else:
+                    replacement = random.randrange(column_state["sample_seen"])
+                    if replacement < self.SAMPLE_SIZE:
+                        column_state["sample"][replacement] = value
 
             self.statistics.update_streaming(column_state["statistics"], series)
+
+    @staticmethod
+    def _dtype_kind(series: pd.Series) -> str:
+        if pd.api.types.is_bool_dtype(series):
+            return "boolean"
+        if pd.api.types.is_numeric_dtype(series):
+            return "numeric"
+        if pd.api.types.is_datetime64_any_dtype(series):
+            return "datetime"
+        return "other"
 
     def finalize_streaming(self, state: dict) -> dict:
         columns = {}
         for column, column_state in state["columns"].items():
             rows = column_state["rows"]
-            non_null = rows - column_state["null_count"]
+            null_count = column_state["null_count"]
+            non_null = rows - null_count
             exact = not column_state["unique_overflow"]
-            unique_count = len(column_state["unique_values"]) if exact else self.MAX_UNIQUE_VALUES + 1
-
-            # Do not force the first chunk's dtype onto the accumulated sample.
-            # Later chunks can contain valid clinical strings (for example,
-            # ">100,000 CFU/mL") even when the first chunk was inferred as float.
-            # Let pandas preserve the mixed values rather than raising during
-            # Series construction.
-            sample = pd.Series(column_state["sample"])
-            semantic_type = self.datatype.infer_streaming(
-                column,
-                column_state["dtype"],
-                sample,
-                non_null,
-                unique_count,
+            unique_count = (
+                len(column_state["unique_values"])
+                if exact else self.MAX_UNIQUE_VALUES + 1
             )
-            validation_type = self.datatype.validation_type(column_state["dtype"], semantic_type)
+            sample = pd.Series(column_state["sample"])
+            dtype_drift = len(column_state["dtype_kinds"]) > 1
+            parse_failures = column_state["numeric_parse_failures"]
+            mixed_numeric = column_state["is_numeric"] and parse_failures > 0
+
+            # Mixed physical representations must not be reported as purely
+            # numeric. For columns with no dtype drift, preserve the source dtype.
+            if mixed_numeric or dtype_drift:
+                pandas_dtype = "mixed"
+            else:
+                pandas_dtype = column_state["dtype"]
+
+            if mixed_numeric:
+                semantic_type = "text"
+            else:
+                semantic_type = self.datatype.infer_streaming(
+                    column, pandas_dtype, sample, non_null, unique_count
+                )
+            validation_type = self.datatype.validation_type(pandas_dtype, semantic_type)
+
+            statistics = self.statistics.finalize_streaming(
+                column_state["statistics"], rows
+            )
+            if mixed_numeric:
+                statistics["numeric_parse_failures"] = int(parse_failures)
+                statistics["actual_nulls"] = int(null_count)
+                statistics["count"] = int(non_null)
+                statistics["missing"] = int(null_count + parse_failures)
+                statistics["missing_percentage"] = round(
+                    (null_count + parse_failures) / max(rows, 1) * 100, 2
+                )
+                statistics["numeric_count"] = int(
+                    column_state["statistics"]["count"]
+                )
+                # Numeric summaries describe only parseable numeric values.
+                statistics["summary_scope"] = "numeric_values_only"
+
             columns[column] = {
                 "name": column,
-                "pandas_dtype": column_state["dtype"],
+                "pandas_dtype": pandas_dtype,
                 "semantic_type": semantic_type,
                 "validation_type": validation_type,
                 "memory_usage": int(column_state["memory_usage"]),
                 "unique_values": int(unique_count),
                 "unique_values_exact": exact,
                 "cardinality_ratio": round(unique_count / max(non_null, 1), 6),
-                "null_count": int(column_state["null_count"]),
-                "null_percentage": round(column_state["null_count"] / max(rows, 1) * 100, 2),
-                "all_null": bool(rows > 0 and column_state["null_count"] == rows),
-                "statistics": self.statistics.finalize_streaming(
-                    column_state["statistics"], rows
-                ),
+                "null_count": int(null_count),
+                "null_percentage": round(null_count / max(rows, 1) * 100, 2),
+                "all_null": bool(rows > 0 and null_count == rows),
+                "statistics": statistics,
             }
         return columns
 
