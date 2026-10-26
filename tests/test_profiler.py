@@ -19,6 +19,7 @@ def test_streaming_detects_late_non_numeric_clinical_values():
     assert result["statistics"]["actual_nulls"] == 0
     assert result["statistics"]["count"] == 120
     assert result["statistics"]["missing"] == 0
+    assert result["statistics"]["missing_percentage"] == 0.0
     assert result["statistics"]["summary_scope"] == "numeric_values_only"
 
 
