@@ -129,14 +129,15 @@ class ColumnProfiler:
                 statistics["numeric_parse_failures"] = int(parse_failures)
                 statistics["actual_nulls"] = int(null_count)
                 statistics["count"] = int(non_null)
-                statistics["missing"] = int(null_count + parse_failures)
+                # Keep true missingness separate from non-null values that fail
+                # numeric parsing. Numeric summaries cover only parseable values.
+                statistics["missing"] = int(null_count)
                 statistics["missing_percentage"] = round(
-                    (null_count + parse_failures) / max(rows, 1) * 100, 2
+                    null_count / max(rows, 1) * 100, 2
                 )
                 statistics["numeric_count"] = int(
                     column_state["statistics"]["count"]
                 )
-                # Numeric summaries describe only parseable numeric values.
                 statistics["summary_scope"] = "numeric_values_only"
 
             columns[column] = {
