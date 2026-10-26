@@ -232,6 +232,19 @@ class ConstraintInferer:
                 continue
 
             lower, upper = float(np.min(inlier_values)), float(np.max(inlier_values))
+
+            # Keep the learned support robust to isolated extremes, but do not
+            # trim a legitimate edge value merely because an unsupervised model
+            # labels some repeated observations as anomalies. The 1st/99th
+            # percentiles provide a small empirical guard band; the consensus
+            # inlier range remains the primary signal.
+            empirical_lower, empirical_upper = (
+                float(np.quantile(X, 0.01)),
+                float(np.quantile(X, 0.99)),
+            )
+            lower = min(lower, empirical_lower)
+            upper = max(upper, empirical_upper)
+
             if not np.isfinite(lower) or not np.isfinite(upper) or lower == upper:
                 continue
 
