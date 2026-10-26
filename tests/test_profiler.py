@@ -1,6 +1,7 @@
 import pandas as pd
 
 from profiling.column_profiler import ColumnProfiler
+from profiling.key_detector import KeyDetector
 
 
 def test_streaming_detects_late_non_numeric_clinical_values():
@@ -17,7 +18,8 @@ def test_streaming_detects_late_non_numeric_clinical_values():
     assert result["statistics"]["numeric_parse_failures"] == 20
     assert result["statistics"]["actual_nulls"] == 0
     assert result["statistics"]["count"] == 120
-    assert result["statistics"]["missing"] == 20
+    assert result["statistics"]["missing"] == 0
+    assert result["statistics"]["summary_scope"] == "numeric_values_only"
 
 
 def test_streaming_column_statistics_match_full_frame_for_numeric_data():
@@ -41,6 +43,27 @@ def test_streaming_semantic_sample_is_not_limited_to_first_chunk():
 
     result = ColumnProfiler().profile_chunks([first, second])["status"]
 
-    # Reservoir sampling should see the much larger second chunk.
     assert result["semantic_type"] in {"categorical", "text"}
     assert result["unique_values"] == 151
+
+
+def test_key_detector_handles_duplicates_across_chunk_boundaries():
+    first = pd.DataFrame({"row_id": [1, 2, 3], "patient_id": [10, 11, 12]})
+    second = pd.DataFrame({"row_id": [4, 5, 2], "patient_id": [13, 14, 15]})
+
+    result = KeyDetector().detect_chunks([first, second])
+
+    assert "row_id" not in result["primary_keys"]
+    assert "patient_id" in result["foreign_keys"]
+    assert "patient_id" in result["primary_keys"]
+
+
+def test_key_detector_excludes_columns_with_nulls():
+    chunks = [
+        pd.DataFrame({"candidate_id": [1, 2]}),
+        pd.DataFrame({"candidate_id": [None, 4]}),
+    ]
+
+    result = KeyDetector().detect_chunks(chunks)
+
+    assert "candidate_id" not in result["primary_keys"]
