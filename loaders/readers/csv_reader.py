@@ -94,9 +94,15 @@ class CsvReader:
         file_path: str | Path,
         *,
         chunksize: int = 100_000,
-        max_file_size_mb: float = 10,
+        max_file_size_mb: float | None = None,
     ) -> int:
-        """Count rows in a bounded-size CSV without materializing it."""
+        """Count rows in a CSV using bounded-memory chunked reads.
+
+        The optional size limit is retained for callers that explicitly want
+        to prohibit full scans. By default, this method can count large CSV/CSV.GZ
+        files without materializing them in RAM; compressed files still require
+        a full decompression/read pass.
+        """
         file_path = Path(file_path)
 
         if not file_path.exists():
@@ -107,10 +113,11 @@ class CsvReader:
             raise ValueError("chunksize must be greater than zero")
 
         size_mb = file_path.stat().st_size / (1024 ** 2)
-        if size_mb > max_file_size_mb:
+        if max_file_size_mb is not None and size_mb > max_file_size_mb:
             raise ValueError(
-                f"Cannot count unknown row count for large file "
-                f"{file_path.name} ({size_mb:.1f} MB > {max_file_size_mb:.1f} MB)"
+                f"Cannot count rows for {file_path.name}: "
+                f"{size_mb:.1f} MB exceeds configured limit "
+                f"{max_file_size_mb:.1f} MB"
             )
 
         options = self._read_options(chunksize=chunksize)
