@@ -68,3 +68,36 @@ def test_key_detector_excludes_columns_with_nulls():
     result = KeyDetector().detect_chunks(chunks)
 
     assert "candidate_id" not in result["primary_keys"]
+
+def test_dataset_streaming_counts_mixed_dtype_columns_as_categorical():
+    from profiling.dataset_profiler import DatasetProfiler
+
+    profiler = DatasetProfiler()
+    report = profiler.profile_chunks(
+        "mixed_demo",
+        [
+            pd.DataFrame({"lab_result": [1.0, 2.0]}),
+            pd.DataFrame({"lab_result": [">100 CFU/mL"]}),
+        ],
+    )
+
+    assert report["rows"] == 3
+    assert report["numeric_columns"] == 0
+    assert report["categorical_columns"] == 1
+
+
+def test_key_detector_streaming_keeps_uniqueness_tracking_on_disk():
+    detector = KeyDetector()
+    state = detector.start_streaming()
+    try:
+        detector.update_streaming(state, pd.DataFrame({"id": [1, 2, 3]}))
+        assert "database_path" in state
+        assert "seen_values" not in state
+        detector.update_streaming(state, pd.DataFrame({"id": [4, 5, 3]}))
+        result = detector.finalize_streaming(state)
+        assert "id" not in result["primary_keys"]
+    finally:
+        from pathlib import Path
+        path = state.get("database_path")
+        if path:
+            Path(path).unlink(missing_ok=True)
