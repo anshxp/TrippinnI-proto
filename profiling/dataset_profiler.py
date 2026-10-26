@@ -62,6 +62,7 @@ class DatasetProfiler:
             "missing_cells": 0,
             "complete_rows": 0,
             "dtypes": {},
+            "dtype_kinds": {},
             "empty_columns": set(),
             "constant_values": {},
             "constant_valid": {},
@@ -77,6 +78,14 @@ class DatasetProfiler:
         state["missing_cells"] += int(dataframe.isna().sum().sum())
         state["complete_rows"] += int((~dataframe.isna().any(axis=1)).sum())
         state["dtypes"].update({column: dtype for column, dtype in dataframe.dtypes.items()})
+        for column, dtype in dataframe.dtypes.items():
+            kind = (
+                "boolean" if pd.api.types.is_bool_dtype(dtype)
+                else "numeric" if pd.api.types.is_numeric_dtype(dtype)
+                else "datetime" if pd.api.types.is_datetime64_any_dtype(dtype)
+                else "other"
+            )
+            state["dtype_kinds"].setdefault(column, set()).add(kind)
 
         for column in dataframe.columns:
             series = dataframe[column]
@@ -126,10 +135,23 @@ class DatasetProfiler:
             "missing_percentage": round(state["missing_cells"] / max(size, 1) * 100, 2),
             "complete_rows": int(state["complete_rows"]),
             "complete_row_percentage": round(state["complete_rows"] / max(rows, 1) * 100, 2),
-            "numeric_columns": int(sum(pd.api.types.is_numeric_dtype(dtype) for dtype in dtypes)),
-            "categorical_columns": int(sum(pd.api.types.is_object_dtype(dtype) for dtype in dtypes)),
-            "datetime_columns": int(sum(pd.api.types.is_datetime64_any_dtype(dtype) for dtype in dtypes)),
-            "boolean_columns": int(sum(pd.api.types.is_bool_dtype(dtype) for dtype in dtypes)),
+            "numeric_columns": int(sum(
+                state["dtype_kinds"].get(column, set()) == {"numeric"}
+                for column in columns
+            )),
+            "categorical_columns": int(sum(
+                "other" in state["dtype_kinds"].get(column, set())
+                or len(state["dtype_kinds"].get(column, set())) > 1
+                for column in columns
+            )),
+            "datetime_columns": int(sum(
+                state["dtype_kinds"].get(column, set()) == {"datetime"}
+                for column in columns
+            )),
+            "boolean_columns": int(sum(
+                state["dtype_kinds"].get(column, set()) == {"boolean"}
+                for column in columns
+            )),
             "empty_columns": sorted(state["empty_columns"]),
             "constant_columns": sorted(column for column in columns if state["constant_valid"].get(column, True)),
         }
