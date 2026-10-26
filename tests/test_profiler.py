@@ -101,3 +101,14 @@ def test_key_detector_streaming_keeps_uniqueness_tracking_on_disk():
         path = state.get("database_path")
         if path:
             Path(path).unlink(missing_ok=True)
+
+
+def test_csv_reader_counts_large_file_when_no_limit_is_requested(tmp_path):
+    from loaders.readers.csv_reader import CsvReader
+
+    source = tmp_path / "rows.csv"
+    source.write_text("id,value\n1,a\n2,b\n3,c\n", encoding="utf-8")
+
+    count = CsvReader().count_rows(source, chunksize=2, max_file_size_mb=None)
+
+    assert count == 3
