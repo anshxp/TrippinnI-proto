@@ -122,13 +122,14 @@ MIMIC_V31_ROW_COUNTS = {
     "icu_procedureevents": 808_706,
 }
 
-# Local NVMe workspace (F:) for the prototype.
-# Override with environment variables if the dataset/workspace lives elsewhere.
+# Resolve default paths from this checkout so the prototype works on any
+# drive or machine. Environment variables remain available for custom data
+# and workspace locations.
+PROJECT_ROOT = Path(__file__).resolve().parent
 DATA_ROOT = Path(
-    os.getenv(
-        "TRIPPINNI_DATA_ROOT",
-        r"F:\Ansh's\physionet.org\files\mimiciv\3.1",
-    )
-)
-WORK_ROOT = Path(os.getenv("TRIPPINNI_WORK_ROOT", "F:/TrippinnI-work"))
+    os.getenv("TRIPPINNI_DATA_ROOT", str(PROJECT_ROOT / "data"))
+).expanduser()
+WORK_ROOT = Path(
+    os.getenv("TRIPPINNI_WORK_ROOT", str(PROJECT_ROOT))
+).expanduser()
 OUTPUT_ROOT = WORK_ROOT / "outputs"
