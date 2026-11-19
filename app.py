@@ -6,6 +6,7 @@ import argparse
 from pathlib import Path
 
 from core.pipeline import Pipeline
+from loaders.registry import LoaderRegistry
 from profiling.visualization import ReportVisualizer
 
 
@@ -16,7 +17,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--dataset-type",
         required=True,
-        help="Registered loader type (for example: csv, json, or a registered domain adapter).",
+        choices=LoaderRegistry.supported_datasets(),
+        help="Registered dataset loader. Use 'mimic' for MIMIC-IV folders containing .csv and/or .csv.gz files; use 'synthea' for Synthea CSV data.",
     )
     parser.add_argument(
         "--dataset-path",
