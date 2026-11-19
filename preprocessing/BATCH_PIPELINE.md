@@ -61,8 +61,8 @@ Across batches:
 5. Imputation remains disabled unless explicitly enabled. Start with synthetic
    or de-identified data, inspect reports and archives, and never commit clinical
    data or generated patient-level artifacts to Git.
-6. Re-running an existing batch is blocked by default. Use a new output root
-   for a clean experiment; `--force` is intended only for deliberate reruns.
+6. Re-running an existing batch is blocked to prevent duplicate audit/training records.
+   Use a new output root for a clean experiment.
 
 ## Example progression
 
