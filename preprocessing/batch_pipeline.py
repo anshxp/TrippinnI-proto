@@ -11,6 +11,7 @@ import hashlib
 import json
 import logging
 import shutil
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -174,9 +175,16 @@ def run_directory_batch(
     logger = logging.getLogger("trippinni.batch")
     logger.setLevel(logging.INFO)
     logger.handlers.clear()
-    handler = logging.FileHandler(log_path, encoding="utf-8")
-    handler.setFormatter(logging.Formatter("%(asctime)s | %(levelname)s | %(message)s"))
-    logger.addHandler(handler)
+    formatter = logging.Formatter(
+        "%(asctime)s | %(levelname)s | %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
+    )
+    file_handler = logging.FileHandler(log_path, encoding="utf-8")
+    file_handler.setFormatter(formatter)
+    console_handler = logging.StreamHandler(sys.stdout)
+    console_handler.setFormatter(formatter)
+    logger.addHandler(file_handler)
+    logger.addHandler(console_handler)
     logger.propagate = False
     if state_path.exists():
         state = json.loads(state_path.read_text(encoding="utf-8"))
@@ -426,8 +434,10 @@ def run_directory_batch(
     _save_state(state_path, state)
     logger.info("RUN FINISHED status=%s completed=%d failed=%d",
                 manifest["run_status"], len(table_results), len(failures))
-    handler.close()
-    logger.removeHandler(handler)
+    file_handler.close()
+    console_handler.close()
+    logger.removeHandler(file_handler)
+    logger.removeHandler(console_handler)
     return {"manifest": str(manifest_path), **manifest}
 
 
