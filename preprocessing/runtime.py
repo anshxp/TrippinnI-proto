@@ -1,80 +1,147 @@
-""""Opt-in bounded runner for one DataFrame or chunk."""
+"""Deterministic, auditable preprocessing runtime; no LLM/Ollama dependency."""
 from __future__ import annotations
-import json, time, uuid
+
+import json
+import time
+import uuid
 from pathlib import Path
+from typing import Any
+
 import pandas as pd
-import config
-from preprocessing.agent import OllamaPlanner
+
 from preprocessing.registry import build_action_registry, profile_dataframe
 
 
-def run_dataframe(df: pd.DataFrame, *, file_name: str, output_dir: str | Path, model: str | None = None, max_iterations: int = 5, allow_imputation: bool = False, context_metadata: dict | None = None) -> dict:
-    """Profile -> LLM selects one registered tool -> execute -> re-profile.
+def _select_actions(profile: dict[str, Any], specs: list[Any], *, allow_imputation: bool) -> list[dict[str, Any]]:
+    """Transparent conservative rules. These are candidate decisions, not clinical labels."""
+    by_name = {spec.name: spec for spec in specs}
+    decisions: list[dict[str, Any]] = []
+    decisions.append({
+        "action": "report_missingness", "parameters": {},
+        "rule_id": "DQ-MISS-001",
+        "rationale": "Always profile column-level missingness before considering mutation.",
+    })
+    decisions.append({
+        "action": "report_exact_duplicates", "parameters": {},
+        "rule_id": "DQ-DUP-001",
+        "rationale": "Always quantify exact duplicate candidates; this action does not delete rows.",
+    })
+    for column, details in profile.get("columns", {}).items():
+        numeric = details.get("numeric_summary")
+        if numeric and details.get("distinct_non_null", 0) >= 4:
+            decisions.append({
+                "action": "flag_iqr_outliers", "parameters": {"column": column},
+                "rule_id": "DQ-OUT-IQR-001",
+                "rationale": "Numeric column has at least four distinct observed values; add a flag only, without changing clinical values.",
+            })
+    # Imputation is intentionally not auto-selected. It requires an explicit
+    # human-approved action request and a clinically justified policy.
+    return [d for d in decisions if d["action"] in by_name]
 
-    Pass a bounded chunk/table. This function does not read whole source files.
-    """
-    if max_iterations < 1: raise ValueError("max_iterations must be positive")
-    root=Path(output_dir); root.mkdir(parents=True,exist_ok=True)
-    safe_name=Path(file_name).stem.replace(" ","_")
-    archive=root/"archive"; archive.mkdir(parents=True,exist_ok=True)
-    specs,handlers=build_action_registry()
-    if not allow_imputation: specs=[s for s in specs if s.name!="median_imputation"]
-    spec_map={s.name:s for s in specs}
-    planner=OllamaPlanner(model=model or config.PREPROCESSING_MODEL, num_ctx=config.OLLAMA_NUM_CTX)
-    working=df.copy(deep=True)
-    profile=profile_dataframe(working)
-    history=[]; reports=[]; run_id=uuid.uuid4().hex
-    for iteration in range(1,max_iterations+1):
+
+def run_dataframe(
+    df: pd.DataFrame, *, file_name: str, output_dir: str | Path,
+    model: str | None = None, max_iterations: int = 5,
+    allow_imputation: bool = False, context_metadata: dict | None = None,
+    selected_actions: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    """Profile -> deterministic allow-listed actions -> re-profile -> audit."""
+    if max_iterations < 1:
+        raise ValueError("max_iterations must be positive")
+    root = Path(output_dir)
+    root.mkdir(parents=True, exist_ok=True)
+    archive = root / "archive"
+    archive.mkdir(parents=True, exist_ok=True)
+    specs, handlers = build_action_registry()
+    working = df.copy(deep=True)
+    before_profile = profile_dataframe(working)
+    decisions = selected_actions if selected_actions is not None else _select_actions(
+        before_profile, specs, allow_imputation=allow_imputation
+    )
+    spec_map = {s.name: s for s in specs}
+    run_id = uuid.uuid4().hex
+    actions: list[dict[str, Any]] = []
+    seen: set[tuple[str, str]] = set()
+
+    for iteration, decision in enumerate(decisions[:max_iterations], start=1):
+        name = decision.get("action")
+        params = decision.get("parameters") or {}
+        if name not in spec_map or name not in handlers:
+            actions.append({"iteration": iteration, "action": name, "status": "blocked_unregistered"})
+            continue
+        if not isinstance(params, dict):
+            actions.append({"iteration": iteration, "action": name, "status": "blocked_invalid_parameters"})
+            continue
+        spec = spec_map[name]
+        if spec.requires_approval:
+            actions.append({
+                "iteration": iteration, "action": name, "status": "approval_required",
+                "rule_id": decision.get("rule_id"),
+            })
+            continue
+        key = (name, str(params))
+        if key in seen:
+            continue
+        seen.add(key)
+        action_id = uuid.uuid4().hex
+        started = time.time()
+        before = profile_dataframe(working)
         try:
-            decision=planner.choose_action(profile,specs,history,context_metadata=context_metadata)
+            result = handlers[name](
+                working, parameters=params, archive_dir=archive,
+                run_id=run_id, action_id=action_id,
+            )
+            status = result.get("status", "failed")
+            if status == "committed":
+                working = result.get("dataset", working)
+            after = profile_dataframe(working)
+            record = {
+                "run_id": run_id, "action_id": action_id, "iteration": iteration,
+                "action": name, "module": spec.module, "status": status,
+                "rule_id": decision.get("rule_id"),
+                "rationale": decision.get("rationale", ""),
+                "parameters": params, "summary": result.get("summary", ""),
+                "changed_records": int(result.get("changed_records", 0)),
+                "archived_records": int(result.get("archived_records", 0)),
+                "details": result.get("details", {}),
+                "before_profile": before, "after_profile": after,
+                "elapsed_seconds": round(time.time() - started, 4),
+                "requires_human_validation": True,
+            }
+            if result.get("error"):
+                record["error"] = str(result["error"])
+            actions.append(record)
+            with (archive / f"{run_id}_action_log.jsonl").open("a", encoding="utf-8") as stream:
+                stream.write(json.dumps(record, default=str) + "\n")
+            if status != "committed":
+                break
         except Exception as exc:
-            # A local-model timeout or malformed response must not abort the
-            # dataset run. Preserve this chunk unchanged and write a diagnostic.
-            reports.append({
-                "iteration": iteration,
-                "action": None,
-                "status": "planner_failed",
+            actions.append({
+                "run_id": run_id, "action_id": action_id, "iteration": iteration,
+                "action": name, "status": "failed",
                 "error": f"{type(exc).__name__}: {exc}",
-                "before_profile": profile,
+                "before_profile": before, "requires_human_validation": True,
             })
-            history.append({"iteration": iteration, "action": None, "status": "planner_failed"})
             break
-        name=decision.get("action")
-        if not isinstance(name, str):
-            reports.append({"iteration": iteration, "action": None, "status": "invalid_decision", "error": "Planner action must be a string."})
-            break
-        if decision.get("stop") is True or name=="stop": break
-        if name not in spec_map:
-            reports.append({
-                "iteration": iteration,
-                "action": name,
-                "status": "unregistered_action_blocked",
-                "error": f"LLM selected unregistered action: {name!r}; no action was executed.",
-                "allowed_actions": sorted(spec_map),
-                "before_profile": profile,
-            })
-            history.append({"iteration": iteration, "action": name, "status": "unregistered_action_blocked"})
-            break
-        if not isinstance(decision.get("parameters",{}),dict):
-            reports.append({"iteration": iteration, "action": name, "status": "invalid_parameters", "error": "LLM parameters must be an object.", "before_profile": profile})
-            break
-        if any(x["action"]==name and x["status"]=="committed" for x in history):
-            history.append({"iteration":iteration,"action":name,"status":"repeated_action_blocked"}); break
-        started=time.time(); action_id=uuid.uuid4().hex; before=profile
-        result=handlers[name](working,parameters=decision.get("parameters",{}),archive_dir=archive,run_id=run_id,action_id=action_id)
-        if result.get("status")!="committed":
-            reports.append({"action":name,"status":result.get("status","failed"),"error":result.get("error"),"before_profile":before})
-            break
-        # Handlers return a new DataFrame. The original caller's DataFrame stays unchanged.
-        working=result.get("dataset",working)
-        profile=profile_dataframe(working)
-        record={"run_id":run_id,"action_id":action_id,"iteration":iteration,"action":name,"module":spec_map[name].module,"status":"committed","rationale":str(decision.get("rationale","")),"parameters":decision.get("parameters",{}),"summary":result.get("summary",""),"changed_records":result.get("changed_records",0),"archived_records":result.get("archived_records",0),"details":result.get("details",{}),"before_profile":before,"after_profile":profile,"elapsed_seconds":round(time.time()-started,3)}
-        reports.append(record); history.append({"iteration":iteration,"action":name,"status":"committed","summary":record["summary"]})
-        with (archive/f"{run_id}_action_log.jsonl").open("a",encoding="utf-8") as stream: stream.write(json.dumps(record,default=str)+"\n")
-    output_path=root/f"{safe_name}_processed.csv"; tmp=output_path.with_suffix(".tmp")
-    working.to_csv(tmp,index=False); tmp.replace(output_path)
-    report_path=root/f"{safe_name}_preprocessing_report.json"
-    report={"run_id":run_id,"file_name":file_name,"iterations":len(reports),"model":model,"planner_failures":sum(1 for item in reports if str(item.get("status","")).startswith("planner") or item.get("status")=="unregistered_action_blocked"),"context_metadata_tables": list((context_metadata or {}).get("tables", {}).keys()),"final_profile":profile,"actions":reports,"output_file":str(output_path),"archive_dir":str(archive)}
-    report_path.write_text(json.dumps(report,indent=2,default=str),encoding="utf-8")
-    report["report_file"]=str(report_path)
+
+    output_path = root / f"{Path(file_name).stem.replace(' ', '_')}_processed.csv"
+    temp_path = output_path.with_suffix(".tmp")
+    working.to_csv(temp_path, index=False)
+    temp_path.replace(output_path)
+    final_profile = profile_dataframe(working)
+    report = {
+        "run_id": run_id, "file_name": file_name,
+        "decision_engine": "deterministic_rules_v1",
+        "model": None, "rows_before": len(df), "rows_after": len(working),
+        "row_count_preserved": len(df) == len(working),
+        "context_metadata_tables": list((context_metadata or {}).get("tables", {}).keys()),
+        "before_profile": before_profile, "final_profile": final_profile,
+        "actions": actions, "output_file": str(output_path),
+        "archive_dir": str(archive),
+        "clinical_validity": "not_established",
+        "training_label_status": "candidate_requires_review",
+    }
+    report_path = root / f"{Path(file_name).stem}_preprocessing_report.json"
+    report_path.write_text(json.dumps(report, indent=2, default=str), encoding="utf-8")
+    report["report_file"] = str(report_path)
     return report
