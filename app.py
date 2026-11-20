@@ -12,7 +12,7 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(
         description=(
             "Recursively find every CSV/CSV.GZ in a dataset directory, extract a "
-            "10% batch, preprocess every extracted table, and generate audit records."
+            "2.5% batch, preprocess every extracted table, and generate audit records."
         )
     )
     parser.add_argument(
@@ -27,15 +27,17 @@ def parse_args() -> argparse.Namespace:
         "--output-root", type=Path, default=Path("outputs/manual_batches"),
         help="Output directory, which must be outside the source dataset directory.",
     )
-    parser.add_argument("--sample-fraction", type=float, default=0.10,
-                        help="Fraction of patients/rows to extract (default: 0.10).")
-    parser.add_argument("--extraction-chunksize", type=int, default=50_000)
+    parser.add_argument("--sample-fraction", type=float, default=0.025,
+                        help="Fraction of patients/rows to extract (default: 0.025).")
+    parser.add_argument("--extraction-chunksize", type=int, default=5_000)
     parser.add_argument(
-        "--chunksize", type=int, default=50_000,
+        "--chunksize", type=int, default=5_000,
         help="Rows per in-memory preprocessing chunk; all extracted rows are processed.",
     )
     parser.add_argument("--random-seed", type=int, default=42,
                         help="Reproducible patient cohort seed for MIMIC-IV.")
+    parser.add_argument("--profile-mode", choices=("fast", "full"), default="fast",
+                        help="Fast skips exact cardinality, quantiles, and duplicate scans; full computes them.")
     parser.add_argument("--resume", action="store_true",
                         help="Resume an existing output directory using run_state.json.")
     parser.add_argument(
@@ -64,6 +66,7 @@ def main() -> int:
         allow_imputation=args.allow_imputation,
         random_seed=args.random_seed,
         resume=args.resume,
+        profile_mode=args.profile_mode,
     )
     print(json.dumps(result, indent=2, default=str))
     print(f"Run status: {result['run_status']}")
