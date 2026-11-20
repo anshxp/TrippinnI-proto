@@ -201,8 +201,13 @@ def run_directory_batch(
 
     if mimic_mode:
         patient_path = patient_files[0]
-        subject_values = _read_key_set(patient_path, "subject_id",
-                                       chunksize=extraction_chunksize)
+        logger.info("BUILD_COHORT patient_table=%s", patient_path.relative_to(source))
+        try:
+            subject_values = _read_key_set(patient_path, "subject_id",
+                                           chunksize=extraction_chunksize)
+        except Exception:
+            logger.exception("COHORT_FAILED stage=read_patient_subject_ids file=%s", patient_path)
+            raise
         patient_count = len(subject_values)
         if patient_count == 0:
             raise ValueError(f"No subject_id values found in {patient_path}")
@@ -217,15 +222,23 @@ def run_directory_batch(
         icustays = [p for p in files if _stem(p).lower() == "icustays"
                     and {"subject_id", "stay_id"}.issubset(_header(p))]
         if admissions:
-            selected_hadm = _collect_child_keys(
-                admissions[0], key="hadm_id", selected_subjects=selected_subjects,
-                chunksize=extraction_chunksize,
-            )
+            try:
+                selected_hadm = _collect_child_keys(
+                    admissions[0], key="hadm_id", selected_subjects=selected_subjects,
+                    chunksize=extraction_chunksize,
+                )
+            except Exception:
+                logger.exception("COHORT_FAILED stage=read_admissions_keys file=%s", admissions[0])
+                raise
         if icustays:
-            selected_stays = _collect_child_keys(
-                icustays[0], key="stay_id", selected_subjects=selected_subjects,
-                chunksize=extraction_chunksize,
-            )
+            try:
+                selected_stays = _collect_child_keys(
+                    icustays[0], key="stay_id", selected_subjects=selected_subjects,
+                    chunksize=extraction_chunksize,
+                )
+            except Exception:
+                logger.exception("COHORT_FAILED stage=read_icustays_keys file=%s", icustays[0])
+                raise
 
     table_results: list[dict[str, Any]] = []
     failures: list[dict[str, str]] = []
