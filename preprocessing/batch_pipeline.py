@@ -318,50 +318,32 @@ def run_batch(
     if batch_index < 0 or not 0 < batch_fraction <= 1:
         raise ValueError("batch_index must be >= 0 and batch_fraction in (0, 1]")
     total = count_csv_rows(source, chunksize=extraction_chunksize)
+    if total == 0:
+        raise ValueError("Source contains no data rows")
     batch_rows = max(1, int(total * batch_fraction))
     start, end = batch_index * batch_rows, min((batch_index + 1) * batch_rows, total)
     if start >= total:
         raise ValueError(f"Batch {batch_index} starts beyond {total} rows")
-    stem = _stem(source)
-    batch_root = root / f"{stem}_batch_{batch_index + 1:03d}"
+    batch_root = root / f"{_stem(source)}_batch_{batch_index + 1:03d}"
     if batch_root.exists():
-        raise FileExistsError(f"{batch_root} already exists")
-    batch_root.mkdir(parents=True)
-    extracted = batch_root / f"{stem}_raw.csv"
-    written = 0
-    temp = extracted.with_suffix(".tmp")
-    for frame in pd.read_csv(source, chunksize=extraction_chunksize, low_memory=False):
-        take = frame.iloc[start:min(end, written + len(frame))] if False else None
-        offset = sum([]) if False else 0
-        break
-    # Delegate to directory workflow for a single-file source by using a
-    # temporary one-file directory would alter paths; retain legacy path via helper.
-    from preprocessing.batch_pipeline import _legacy_single_file_extract
-    return _legacy_single_file_extract(
-        source, batch_root, total=total, start=start, end=end,
-        preprocessing_chunksize=preprocessing_chunksize,
-        extraction_chunksize=extraction_chunksize, allow_imputation=allow_imputation,
-    )
-
-
-def _legacy_single_file_extract(
-    source: Path, batch_root: Path, *, total: int, start: int, end: int,
-    preprocessing_chunksize: int, extraction_chunksize: int, allow_imputation: bool,
-) -> dict[str, Any]:
-    stem = _stem(source)
-    extracted = batch_root / f"{stem}_raw.csv"
+        raise FileExistsError(f"{batch_root} already exists; choose a new output root")
+    batch_root.mkdir(parents=True, exist_ok=False)
+    extracted = batch_root / f"{_stem(source)}_raw.csv"
     temp = extracted.with_suffix(".tmp")
     offset = written = 0
     for frame in pd.read_csv(source, chunksize=extraction_chunksize, low_memory=False):
-        right = min(end, offset + len(frame))
-        left = max(start, offset)
+        left, right = max(start, offset), min(end, offset + len(frame))
         if left < right:
             part = frame.iloc[left - offset:right - offset]
-            part.to_csv(temp, mode="a" if written else "w", header=(written == 0), index=False)
+            part.to_csv(temp, mode="a" if written else "w",
+                        header=(written == 0), index=False)
             written += len(part)
         offset += len(frame)
         if offset >= end:
             break
+    if written != end - start:
+        temp.unlink(missing_ok=True)
+        raise ValueError(f"Expected {end-start} extracted rows, got {written}")
     temp.replace(extracted)
     preprocessing = run_csv_chunks(
         extracted, output_dir=batch_root / "preprocessing",
@@ -369,8 +351,10 @@ def _legacy_single_file_extract(
         allow_imputation=allow_imputation,
     )
     manifest = {
-        "source_file_name": source.name, "source_rows": total,
-        "rows_extracted": written, "rows_processed": preprocessing["rows_processed"],
+        "source_file_name": source.name, "source_fingerprint": _fingerprint(source),
+        "source_rows": total, "batch_index": batch_index,
+        "batch_fraction": batch_fraction, "rows_extracted": written,
+        "rows_processed": preprocessing["rows_processed"],
         "raw_batch_file": str(extracted), "preprocessing": preprocessing,
         "sampling_method": "sequential_row_window",
         "relational_integrity_warning": "Single-table row sampling does not preserve patient relationships.",
