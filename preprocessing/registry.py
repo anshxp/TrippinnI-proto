@@ -9,11 +9,18 @@ from sklearn.ensemble import IsolationForest
 from preprocessing.agent import ActionSpec
 
 
-def profile_dataframe(df: pd.DataFrame) -> dict[str, Any]:
+def profile_dataframe(df: pd.DataFrame, *, mode: str = "fast") -> dict[str, Any]:
+    if mode not in {"fast", "full"}:
+        raise ValueError("profile mode must be 'fast' or 'full'")
     columns = {}
     for name in df.columns:
         s = df[name]
-        item = {"dtype": str(s.dtype), "rows": len(s), "missing_count": int(s.isna().sum()), "missing_fraction": float(s.isna().mean()) if len(s) else 0.0, "distinct_non_null": int(s.nunique(dropna=True))}
+        missing_count = int(s.isna().sum())
+        item = {"dtype": str(s.dtype), "rows": len(s), "missing_count": missing_count,
+                "missing_fraction": float(missing_count / len(s)) if len(s) else 0.0,
+                "non_null_count": int(len(s) - missing_count)}
+        if mode == "full":
+            item["distinct_non_null"] = int(s.nunique(dropna=True))
         # Boolean columns are numeric-like in pandas, but quantile interpolation
         # attempts boolean subtraction and raises TypeError. Profile them separately.
         if pd.api.types.is_bool_dtype(s):
@@ -23,17 +30,23 @@ def profile_dataframe(df: pd.DataFrame) -> dict[str, Any]:
                 "false_count": int((non_null == False).sum()),  # noqa: E712
             }
         elif pd.api.types.is_numeric_dtype(s) and s.notna().any():
-            numeric = pd.to_numeric(s, errors="coerce").dropna()
-            if not numeric.empty:
-                item["numeric_summary"] = {
-                    "min": float(numeric.min()),
-                    "q1": float(numeric.quantile(.25)),
-                    "median": float(numeric.median()),
-                    "q3": float(numeric.quantile(.75)),
-                    "max": float(numeric.max()),
-                }
+            numeric = pd.to_numeric(s, errors="coerce")
+            if mode == "fast":
+                item["numeric_summary"] = {"min": float(numeric.min()), "max": float(numeric.max())}
+            else:
+                numeric = numeric.dropna()
+                if not numeric.empty:
+                    item["numeric_summary"] = {
+                        "min": float(numeric.min()), "q1": float(numeric.quantile(.25)),
+                        "median": float(numeric.median()), "q3": float(numeric.quantile(.75)),
+                        "max": float(numeric.max()),
+                    }
         columns[str(name)] = item
-    return {"row_count": len(df), "column_count": len(df.columns), "columns": columns, "duplicate_row_candidates": int(df.duplicated().sum())}
+    result = {"row_count": len(df), "column_count": len(df.columns), "columns": columns,
+              "profile_mode": mode}
+    if mode == "full":
+        result["duplicate_row_candidates"] = int(df.duplicated().sum())
+    return result
 
 
 def _column(df, params):
@@ -47,7 +60,7 @@ def _result(df, summary, changed=0, archived=0, details=None):
 
 
 def missingness(df, **kwargs):
-    return _result(df.copy(deep=True), "Missingness profiled; no values changed.", details=profile_dataframe(df)["columns"])
+    return _result(df, "Missingness profiled; no values changed.", details={"profiled_columns": len(df.columns)})
 
 
 def duplicates(df, **kwargs):
