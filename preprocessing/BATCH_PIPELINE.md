@@ -1,40 +1,73 @@
 # Deterministic extraction and algorithm-selection data generation
 
-This workflow does not use Qwen, Ollama, an LLM planner, or network model calls.
-A deterministic rule set chooses only allow-listed actions and records the rule
-ID, rationale, parameters, profiles before/after execution, and execution status.
+This branch uses deterministic, allow-listed preprocessing rules. The batch
+workflow does not invoke Qwen, Ollama, an LLM planner, or a network model API.
 
-## First batch (10%)
+## Run it through app.py
+
+Activate the project's Python 3.12 virtual environment, then run:
 
 ```powershell
-python -m preprocessing.batch_pipeline "F:/path/to/table.csv.gz" --batch-index 0 --output-root "F:/TrippinnI-work/manual_batches" --chunksize 1000
+python app.py --dataset-type csv --dataset-path "F:/path/to/table.csv.gz"
 ```
 
-Second batch: use `--batch-index 1`. Each batch is a non-overlapping sequential
-row window. Existing batch folders are not overwritten.
+By default this:
+1. Counts source data rows.
+2. Physically extracts the first 10% into a new CSV under
+   `outputs/manual_batches/<table>_batch_001/`.
+3. Profiles and processes **all rows in that extracted CSV** in bounded-memory
+   chunks (default 1,000 rows per chunk; no 5,000-row total cap).
+4. Writes processed data, per-chunk profiles/action reports, a batch manifest,
+   an audit JSONL, and candidate classifier-training JSONL records.
+
+The source file is read-only and is not overwritten.
+
+### Useful options
+
+```powershell
+# Next 10% of the same source table (non-overlapping row window)
+python app.py --dataset-type csv --dataset-path "F:/path/to/table.csv.gz" --batch-index 1
+
+# Extract 5% per batch and process in 2,000-row chunks
+python app.py --dataset-type csv --dataset-path "F:/path/to/table.csv" --sample-fraction 0.05 --chunksize 2000
+
+# Choose a separate output location
+python app.py --dataset-type csv --dataset-path "F:/path/to/table.csv.gz" --output-root "F:/TrippinnI-work/manual_batches"
+```
+
+Do not reuse an existing batch output folder. The pipeline fails rather than
+silently overwriting it. Use a new output root for a fresh run.
 
 ## Outputs
 
-- Raw extracted rows: `<batch>/<batch>_raw.csv`
-- Processed rows: `<batch>/preprocessing/*_processed.csv`
-- Per-chunk profiles and action reports
-- `audit/batch_audit.jsonl`
-- `classifier_training/algorithm_selection_records.jsonl`
+- Extracted source rows: `<batch>/<batch>_raw.csv`
+- Processed rows: `<batch>/preprocessing/<table>_processed.csv`
+- Per-chunk before/after profiles and action reports
+- Batch manifest: `<batch>/batch_manifest.json`
+- Run audit: `audit/batch_audit.jsonl`
+- Candidate classifier records: `classifier_training/algorithm_selection_records.jsonl`
 
-The default rules always profile missingness and exact duplicates, then add
-IQR outlier flags for numeric columns with at least four distinct values.
-These are candidate algorithm-selection examples, not ground-truth labels.
-No rows or clinical values are deleted or corrected by these default actions.
-Median imputation remains approval-gated and is not automatically selected.
+Default deterministic rules always report missingness and exact duplicate
+candidates, and add IQR outlier flags for eligible numeric columns. They do not
+delete rows or overwrite clinical values. Median imputation is not selected
+automatically; it requires the explicit `--allow-imputation` switch, and should
+only be enabled after a separate human approval and clinical policy decision.
 
-## Limitations
+## Important MIMIC-IV limitation
 
-Sequential row windows are not patient/encounter-aware. Do not use this sampling
-method as a patient-level MIMIC-IV split: linked subject_id/hadm_id/stay_id
-records can be separated. This pipeline currently accepts CSV/CSV.GZ tables,
-not a coordinated multi-table relational extraction.
+This is currently a **single-table CSV/CSV.GZ row-window extractor**, not a
+relational MIMIC-IV sampler. Sequential row windows can split a patient's
+records across batches and can separate `subject_id`, `hadm_id`, and
+`stay_id` relationships. The manifest records this limitation. Do not treat
+the resulting batches as patient-level train/test splits or as relationally
+complete MIMIC-IV subsets. A coordinated patient-key sampler across all
+dependent tables is a separate required implementation.
 
-A successful action or a lower missingness rate does not establish clinical
-validity. Human review and task-specific validation are required before turning
-these candidate records into supervised classifier labels. Keep PHI and generated
-patient-level artifacts outside Git.
+## Interpretation and safety
+
+Candidate algorithm-selection records are not ground-truth labels. A successful
+execution, a flagged outlier, or a changed missingness rate does not establish
+clinical validity or data correctness. Review candidate records and validate
+the result against task-specific clinical/data-governance rules before
+classifier training. Keep source data, extracted PHI, and generated patient-level
+artifacts outside Git.
