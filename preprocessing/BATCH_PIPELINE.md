@@ -1,73 +1,85 @@
-# Deterministic extraction and algorithm-selection data generation
+# Recursive multi-table extraction and preprocessing
 
-This branch uses deterministic, allow-listed preprocessing rules. The batch
-workflow does not invoke Qwen, Ollama, an LLM planner, or a network model API.
+This branch uses deterministic, allow-listed rules. It does not invoke Qwen,
+Ollama, an LLM planner, or a network model API.
 
-## Run it through app.py
+## Run the entire nested dataset at once
 
-Activate the project's Python 3.12 virtual environment, then run:
-
-```powershell
-python app.py --dataset-type csv --dataset-path "F:/path/to/table.csv.gz"
-```
-
-By default this:
-1. Counts source data rows.
-2. Physically extracts the first 10% into a new CSV under
-   `outputs/manual_batches/<table>_batch_001/`.
-3. Profiles and processes **all rows in that extracted CSV** in bounded-memory
-   chunks (default 1,000 rows per chunk; no 5,000-row total cap).
-4. Writes processed data, per-chunk profiles/action reports, a batch manifest,
-   an audit JSONL, and candidate classifier-training JSONL records.
-
-The source file is read-only and is not overwritten.
-
-### Useful options
+Pass the **top-level directory** that contains the nested dataset folders.
+The program recursively discovers every `.csv` and `.csv.gz` file.
 
 ```powershell
-# Next 10% of the same source table (non-overlapping row window)
-python app.py --dataset-type csv --dataset-path "F:/path/to/table.csv.gz" --batch-index 1
-
-# Extract 5% per batch and process in 2,000-row chunks
-python app.py --dataset-type csv --dataset-path "F:/path/to/table.csv" --sample-fraction 0.05 --chunksize 2000
-
-# Choose a separate output location
-python app.py --dataset-type csv --dataset-path "F:/path/to/table.csv.gz" --output-root "F:/TrippinnI-work/manual_batches"
+python app.py --dataset-type csv --dataset-path "C:\Users\Admin\Documents\physionet.org"
 ```
 
-Do not reuse an existing batch output folder. The pipeline fails rather than
-silently overwriting it. Use a new output root for a fresh run.
+Do not pass a made-up example file path. Do not pass the path to one table.
+Pass the directory containing the dataset's subfolders.
 
-## Outputs
+By default, the pipeline:
+1. Recursively discovers all CSV and CSV.GZ tables.
+2. Detects a MIMIC-IV `patients` table, if present.
+3. Selects a reproducible 10% cohort of unique `subject_id` values (seed 42).
+4. Filters tables by `subject_id`, or by linked `hadm_id` / `stay_id` values
+   derived from `hosp/admissions` and `icu/icustays`.
+5. Copies keyless reference/dictionary tables in full (for example, `d_items`);
+   these are lookup tables, not patient records.
+6. Writes every extracted table to a separate output tree.
+7. Profiles and preprocesses all rows of every extracted table in bounded-memory
+   chunks (default 50,000 rows per chunk; no total 5,000-row cap).
+8. Writes per-table reports, audit JSONL, candidate classifier records, and one
+   multi-table manifest.
 
-- Extracted source rows: `<batch>/<batch>_raw.csv`
-- Processed rows: `<batch>/preprocessing/<table>_processed.csv`
-- Per-chunk before/after profiles and action reports
-- Batch manifest: `<batch>/batch_manifest.json`
-- Run audit: `audit/batch_audit.jsonl`
-- Candidate classifier records: `classifier_training/algorithm_selection_records.jsonl`
+The selected patient cohort is 10% of patients. The resulting row fraction will
+not be exactly 10% for every table: each patient's number of admissions, ICU
+stays, and events differs. This is expected and is preferable to independently
+sampling 10% of each table, which would break patient-level relationships.
 
-Default deterministic rules always report missingness and exact duplicate
-candidates, and add IQR outlier flags for eligible numeric columns. They do not
-delete rows or overwrite clinical values. Median imputation is not selected
-automatically; it requires the explicit `--allow-imputation` switch, and should
-only be enabled after a separate human approval and clinical policy decision.
+If no `patients` table is found, the fallback extracts the first 10% of rows
+from each discovered file independently. That fallback does **not** guarantee
+relational integrity.
 
-## Important MIMIC-IV limitation
+## Output layout
 
-This is currently a **single-table CSV/CSV.GZ row-window extractor**, not a
-relational MIMIC-IV sampler. Sequential row windows can split a patient's
-records across batches and can separate `subject_id`, `hadm_id`, and
-`stay_id` relationships. The manifest records this limitation. Do not treat
-the resulting batches as patient-level train/test splits or as relationally
-complete MIMIC-IV subsets. A coordinated patient-key sampler across all
-dependent tables is a separate required implementation.
+Default output root: `outputs/manual_batches` (ignored by Git).
 
-## Interpretation and safety
+- `extracted/`: physical extracted CSV tables, preserving source subfolders
+- `processed/`: preprocessed tables and per-chunk reports
+- `audit/batch_audit.jsonl`: per-table extraction and processing audit
+- `classifier_training/algorithm_selection_records.jsonl`: candidate records
+- `multi_table_manifest.json`: selected cohort counts, per-table row counts,
+  sampling method, output paths, and limitations
 
-Candidate algorithm-selection records are not ground-truth labels. A successful
-execution, a flagged outlier, or a changed missingness rate does not establish
-clinical validity or data correctness. Review candidate records and validate
-the result against task-specific clinical/data-governance rules before
-classifier training. Keep source data, extracted PHI, and generated patient-level
-artifacts outside Git.
+Use a new, empty output directory for each run. The program refuses to overwrite
+an output directory that already contains files.
+
+## Options
+
+```powershell
+# Extract a 5% patient cohort instead of 10%
+python app.py --dataset-type csv --dataset-path "C:\Users\Admin\Documents\physionet.org" --sample-fraction 0.05
+
+# Use a different deterministic patient cohort
+python app.py --dataset-type csv --dataset-path "C:\Users\Admin\Documents\physionet.org" --random-seed 123
+
+# Put generated data on another drive
+python app.py --dataset-type csv --dataset-path "C:\Users\Admin\Documents\physionet.org" --output-root "F:\TrippinnI-work\mimic_10pct"
+```
+
+## Important limitations and review
+
+This implementation uses the standard MIMIC-IV patient, admission, and ICU-stay
+keys. It filters rows using the available key columns; it does not yet validate
+every table-specific foreign-key constraint or guarantee completeness for
+unusual/custom tables. Review the manifest and table counts before downstream
+use. Tables without patient keys are copied in full as reference data.
+
+Default rules report missingness and exact duplicate candidates and add IQR
+outlier flags to eligible numeric columns. They do not delete rows or overwrite
+clinical values. Imputation remains off unless explicitly enabled after human
+approval.
+
+Classifier records are candidate algorithm-selection examples, not ground-truth
+labels. A successful execution or a flagged outlier does not establish clinical
+validity. Validate the extracted cohort and preprocessing outputs before
+classifier training. Keep source data and generated patient-level artifacts
+outside Git.
