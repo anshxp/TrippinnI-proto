@@ -9,7 +9,7 @@ Pass the **top-level directory** that contains the nested dataset folders.
 The program recursively discovers every `.csv` and `.csv.gz` file.
 
 ```powershell
-python app.py --dataset-type csv --dataset-path "C:\Users\Admin\Documents\physionet.org"
+python app.py --dataset-type csv --dataset-path "C:\Users\Admin\Documents\physionet.org" --sample-fraction 0.025 --profile-mode fast
 ```
 
 Do not pass a made-up example file path. Do not pass the path to one table.
@@ -18,23 +18,23 @@ Pass the directory containing the dataset's subfolders.
 By default, the pipeline:
 1. Recursively discovers all CSV and CSV.GZ tables.
 2. Detects a MIMIC-IV `patients` table, if present.
-3. Selects a reproducible 10% cohort of unique `subject_id` values (seed 42).
+3. Selects a reproducible 2.5% cohort of unique `subject_id` values (seed 42).
 4. Filters tables by `subject_id`, or by linked `hadm_id` / `stay_id` values
    derived from `hosp/admissions` and `icu/icustays`.
 5. Copies keyless reference/dictionary tables in full (for example, `d_items`);
    these are lookup tables, not patient records.
 6. Writes every extracted table to a separate output tree.
 7. Profiles and preprocesses all rows of every extracted table in bounded-memory
-   chunks (default 50,000 rows per chunk; no total 5,000-row cap).
+   chunks (default 5,000 rows per chunk; no total 5,000-row cap).
 8. Writes per-table reports, audit JSONL, candidate classifier records, and one
    multi-table manifest.
 
-The selected patient cohort is 10% of patients. The resulting row fraction will
-not be exactly 10% for every table: each patient's number of admissions, ICU
+The selected patient cohort is 2.5% of patients. The resulting row fraction will
+not be exactly 2.5% for every table: each patient's number of admissions, ICU
 stays, and events differs. This is expected and is preferable to independently
-sampling 10% of each table, which would break patient-level relationships.
+sampling 2.5% of each table, which would break patient-level relationships.
 
-If no `patients` table is found, the fallback extracts the first 10% of rows
+If no `patients` table is found, the fallback extracts the first 2.5% of rows
 from each discovered file independently. That fallback does **not** guarantee
 relational integrity.
 
@@ -55,14 +55,14 @@ an output directory that already contains files.
 ## Options
 
 ```powershell
-# Extract a 5% patient cohort instead of 10%
+# Extract a 5% patient cohort instead of 2.5%
 python app.py --dataset-type csv --dataset-path "C:\Users\Admin\Documents\physionet.org" --sample-fraction 0.05
 
 # Use a different deterministic patient cohort
 python app.py --dataset-type csv --dataset-path "C:\Users\Admin\Documents\physionet.org" --random-seed 123
 
 # Put generated data on another drive
-python app.py --dataset-type csv --dataset-path "C:\Users\Admin\Documents\physionet.org" --output-root "F:\TrippinnI-work\mimic_10pct"
+python app.py --dataset-type csv --dataset-path "C:\Users\Admin\Documents\physionet.org" --output-root "F:\TrippinnI-work\mimic_2_5pct"
 ```
 
 ## Important limitations and review
@@ -95,7 +95,7 @@ Each run writes:
 Resume using the same output directory and add `--resume`:
 
 ```powershell
-python app.py --dataset-type csv --dataset-path "C:\Users\Admin\Documents\physionet.org" --output-root "C:\Users\Admin\Documents\TrippinnI-mimic-10pct" --extraction-chunksize 5000 --chunksize 5000 --resume
+python app.py --dataset-type csv --dataset-path "C:\Users\Admin\Documents\physionet.org" --output-root "C:\Users\Admin\Documents\TrippinnI-mimic-2_5pct" --extraction-chunksize 5000 --chunksize 5000 --resume
 ```
 
 Completed tables are skipped. If extraction completed but preprocessing did not,
@@ -107,3 +107,21 @@ Malformed CSV records are not silently discarded. The affected table is marked
 failed with the parser error in the log; other tables continue. Correct or
 re-export that source table, then run again with `--resume`. The failed table
 will be retried. Review failed-table status before using outputs downstream.
+
+
+## Fast profiling (default)
+
+The default `--profile-mode fast` records row/column counts, data types,
+missing counts and fractions, non-null counts, and numeric minimum/maximum.
+It skips exact distinct counts, quartiles/median, and whole-row duplicate scans.
+It also avoids repeating the profile for every action in a chunk.
+
+Fast mode intentionally limits automatic action selection to the missingness
+report. IQR outlier flags and duplicate-candidate counts require the more
+expensive full profile. Use `--profile-mode full` only when those statistics
+are needed and you have sufficient processing time.
+
+The 2.5% MIMIC-IV sample is a patient cohort, not a uniform 2.5% of rows in
+every table. Source tables still need to be scanned to identify rows belonging
+to the selected patients; reducing the cohort does not reduce source scanning
+to 2.5%.
