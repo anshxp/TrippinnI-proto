@@ -36,6 +36,8 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--random-seed", type=int, default=42,
                         help="Reproducible patient cohort seed for MIMIC-IV.")
+    parser.add_argument("--resume", action="store_true",
+                        help="Resume an existing output directory using run_state.json.")
     parser.add_argument(
         "--allow-imputation", action="store_true",
         help="Enable approval-gated median imputation only after human approval.",
@@ -61,12 +63,16 @@ def main() -> int:
         preprocessing_chunksize=args.chunksize,
         allow_imputation=args.allow_imputation,
         random_seed=args.random_seed,
+        resume=args.resume,
     )
     print(json.dumps(result, indent=2, default=str))
+    print(f"Run status: {result['run_status']}")
+    print(f"Failed tables: {result['tables_failed_count']}")
+    print(f"Pipeline log: {result['log_file']}")
     print("Finished recursive extraction and preprocessing.")
     print("Read multi_table_manifest.json for per-table row counts and sampling methods.")
     print("Classifier records are candidates for review, not validated ground-truth labels.")
-    return 0
+    return 1 if result["tables_failed_count"] else 0
 
 
 if __name__ == "__main__":
