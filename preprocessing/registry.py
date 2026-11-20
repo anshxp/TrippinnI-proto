@@ -14,8 +14,24 @@ def profile_dataframe(df: pd.DataFrame) -> dict[str, Any]:
     for name in df.columns:
         s = df[name]
         item = {"dtype": str(s.dtype), "rows": len(s), "missing_count": int(s.isna().sum()), "missing_fraction": float(s.isna().mean()) if len(s) else 0.0, "distinct_non_null": int(s.nunique(dropna=True))}
-        if pd.api.types.is_numeric_dtype(s) and s.notna().any():
-            item["numeric_summary"] = {"min": float(s.min()), "q1": float(s.quantile(.25)), "median": float(s.median()), "q3": float(s.quantile(.75)), "max": float(s.max())}
+        # Boolean columns are numeric-like in pandas, but quantile interpolation
+        # attempts boolean subtraction and raises TypeError. Profile them separately.
+        if pd.api.types.is_bool_dtype(s):
+            non_null = s.dropna()
+            item["boolean_summary"] = {
+                "true_count": int((non_null == True).sum()),  # noqa: E712
+                "false_count": int((non_null == False).sum()),  # noqa: E712
+            }
+        elif pd.api.types.is_numeric_dtype(s) and s.notna().any():
+            numeric = pd.to_numeric(s, errors="coerce").dropna()
+            if not numeric.empty:
+                item["numeric_summary"] = {
+                    "min": float(numeric.min()),
+                    "q1": float(numeric.quantile(.25)),
+                    "median": float(numeric.median()),
+                    "q3": float(numeric.quantile(.75)),
+                    "max": float(numeric.max()),
+                }
         columns[str(name)] = item
     return {"row_count": len(df), "column_count": len(df.columns), "columns": columns, "duplicate_row_candidates": int(df.duplicated().sum())}
 
