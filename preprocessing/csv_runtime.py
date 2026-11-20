@@ -24,6 +24,7 @@ def run_csv_chunks(
     input_path: str | Path, *, output_dir: str | Path,
     chunksize: int = 50_000, max_rows: int | None = None,
     allow_imputation: bool = False, context_metadata: dict[str, Any] | None = None,
+    profile_mode: str = "fast",
 ) -> dict[str, Any]:
     source, destination = Path(input_path), Path(output_dir)
     if not source.is_file():
@@ -45,6 +46,7 @@ def run_csv_chunks(
             report = run_dataframe(
                 chunk, file_name=name, output_dir=chunk_root / name,
                 allow_imputation=allow_imputation, context_metadata=context_metadata,
+                profile_mode=profile_mode,
             )
             processed = Path(report["output_file"])
             header = list(pd.read_csv(processed, nrows=0).columns)
@@ -73,7 +75,7 @@ def run_csv_chunks(
 
     summary = {
         "input_file": str(source.resolve()), "output_file": str(output_path.resolve()),
-        "chunksize": chunksize, "max_rows": max_rows,
+        "chunksize": chunksize, "max_rows": max_rows, "profile_mode": profile_mode,
         "scope": "all_rows" if max_rows is None else "bounded_prefix",
         "chunks_processed": len(reports), "rows_processed": rows,
         "output_columns": columns, "decision_engine": "deterministic_rules_v1",
