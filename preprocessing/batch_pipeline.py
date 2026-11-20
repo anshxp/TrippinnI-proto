@@ -197,7 +197,7 @@ def run_directory_batch(
 
     for source_file in files:
         relative = source_file.relative_to(source)
-        extracted_rel = relative.with_suffix(".csv") if relative.name.lower().endswith(".csv.gz") else relative
+        extracted_rel = relative.with_name(_stem(source_file) + ".csv") if relative.name.lower().endswith(".csv.gz") else relative
         extracted = root / "extracted" / extracted_rel
         columns = _header(source_file)
         key_columns = [key for key in ("subject_id", "hadm_id", "stay_id") if key in columns]
