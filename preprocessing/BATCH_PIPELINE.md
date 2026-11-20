@@ -73,10 +73,12 @@ every table-specific foreign-key constraint or guarantee completeness for
 unusual/custom tables. Review the manifest and table counts before downstream
 use. Tables without patient keys are copied in full as reference data.
 
-Default rules report missingness and exact duplicate candidates and add IQR
-outlier flags to eligible numeric columns. They do not delete rows or overwrite
-clinical values. Imputation remains off unless explicitly enabled after human
-approval.
+Fast mode (the default) reports missingness and basic numeric ranges.
+It does not calculate exact cardinality, quartiles/median, or duplicate counts,
+and it does not select IQR outlier flagging. Full mode adds those more expensive
+statistics and IQR/duplicate candidate reports. Neither mode deletes rows or
+overwrites clinical values. Imputation remains off unless explicitly enabled
+after human approval.
 
 Classifier records are candidate algorithm-selection examples, not ground-truth
 labels. A successful execution or a flagged outlier does not establish clinical
@@ -124,4 +126,12 @@ are needed and you have sufficient processing time.
 The 2.5% MIMIC-IV sample is a patient cohort, not a uniform 2.5% of rows in
 every table. Source tables still need to be scanned to identify rows belonging
 to the selected patients; reducing the cohort does not reduce source scanning
-to 2.5%.
+to 2.5%. Fast profiling reduces the work performed on extracted chunks, but
+extraction still reads the source tables.
+
+
+Select full profiling only when needed:
+
+```powershell
+python app.py --dataset-type csv --dataset-path "C:\Users\Admin\Documents\physionet.org" --sample-fraction 0.025 --profile-mode full
+```
