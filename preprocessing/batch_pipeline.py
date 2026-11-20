@@ -141,9 +141,9 @@ def _write_row_fraction(
 
 def run_directory_batch(
     source_root: str | Path, *, output_root: str | Path,
-    batch_fraction: float = 0.10, extraction_chunksize: int = 50_000,
-    preprocessing_chunksize: int = 50_000, allow_imputation: bool = False,
-    random_seed: int = 42, resume: bool = False,
+    batch_fraction: float = 0.025, extraction_chunksize: int = 5_000,
+    preprocessing_chunksize: int = 5_000, allow_imputation: bool = False,
+    random_seed: int = 42, resume: bool = False, profile_mode: str = "fast",
 ) -> dict[str, Any]:
     """Extract/process every CSV recursively; use a patient cohort when MIMIC keys exist."""
     source = Path(source_root).expanduser().resolve()
@@ -329,7 +329,7 @@ def run_directory_batch(
             _save_state(state_path, state)
             preprocessing = run_csv_chunks(
                 extracted, output_dir=processed_dir, chunksize=preprocessing_chunksize,
-                max_rows=None, allow_imputation=allow_imputation,
+                max_rows=None, allow_imputation=allow_imputation, profile_mode=profile_mode,
             )
             table_result = {
                 "source_relative_path": relative_key,
@@ -432,7 +432,7 @@ def run_directory_batch(
 
 def run_batch(
     source_path: str | Path, *, output_root: str | Path, batch_index: int,
-    batch_fraction: float = 0.10, extraction_chunksize: int = 50_000,
+    batch_fraction: float = 0.025, extraction_chunksize: int = 5_000,
     preprocessing_chunksize: int = 1_000, allow_imputation: bool = False,
 ) -> dict[str, Any]:
     """Backward-compatible single-file extraction entry point."""
@@ -492,7 +492,7 @@ def run_batch(
 def main() -> None:
     parser = argparse.ArgumentParser(description="Recursive multi-table 10% extraction and audited preprocessing")
     parser.add_argument("input_directory", type=Path)
-    parser.add_argument("--batch-fraction", type=float, default=0.10)
+    parser.add_argument("--batch-fraction", type=float, default=0.025)
     parser.add_argument("--output-root", default="outputs/manual_batches")
     parser.add_argument("--extraction-chunksize", type=int, default=50_000)
     parser.add_argument("--chunksize", type=int, default=50_000)
