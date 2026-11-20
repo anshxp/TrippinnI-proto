@@ -1,12 +1,6 @@
-"""Chunked CSV entry point for the TrippinnI preprocessing planner.
-
-The source CSV is never modified. Each chunk is independently profiled and
-processed by the bounded runtime. Output columns are unioned across chunks.
-Chunk-local statistics can differ, so review cross-chunk consistency.
-"""
+"""Chunked CSV processing using deterministic preprocessing rules; no model dependency."""
 from __future__ import annotations
 
-import argparse
 import gc
 import json
 from pathlib import Path
@@ -14,171 +8,79 @@ from typing import Any
 
 import pandas as pd
 
-import config
 from preprocessing.runtime import run_dataframe
 
 
-
 def count_csv_rows(input_path: str | Path, *, chunksize: int = 100_000) -> int:
-    """Count data rows with bounded memory for any supported CSV/CSV.GZ.
-
-    This reads the file to establish an exact 10% prefix boundary, but it does
-    not retain the table in memory and does not send row data to the LLM.
-    Known row counts should be used when available to avoid a second scan.
-    """
     source = Path(input_path)
     if not source.is_file():
-        raise FileNotFoundError(f"Input CSV does not exist: {source}")
+        raise FileNotFoundError(source)
     if chunksize <= 0:
-        raise ValueError("chunksize must be greater than zero")
-    total = 0
-    for chunk in pd.read_csv(source, chunksize=chunksize, low_memory=False):
-        total += len(chunk)
-    return total
+        raise ValueError("chunksize must be positive")
+    return sum(len(chunk) for chunk in pd.read_csv(source, chunksize=chunksize, low_memory=False))
 
 
 def run_csv_chunks(
-    input_path: str | Path,
-    *,
-    output_dir: str | Path,
-    chunksize: int = 50_000,
-    model: str | None = None,
-    max_iterations: int = 5,
-    allow_imputation: bool = False,
-    max_rows: int | None = 5_000,
-    context_metadata: dict[str, Any] | None = None,
+    input_path: str | Path, *, output_dir: str | Path,
+    chunksize: int = 50_000, max_rows: int | None = None,
+    allow_imputation: bool = False, context_metadata: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Process CSV chunks, then stream-align their output schemas."""
-    source = Path(input_path)
-    destination = Path(output_dir)
+    source, destination = Path(input_path), Path(output_dir)
     if not source.is_file():
-        raise FileNotFoundError(f"Input CSV does not exist: {source}")
-    if chunksize <= 0:
-        raise ValueError("chunksize must be greater than zero")
-    if max_rows is not None and max_rows <= 0:
-        raise ValueError("max_rows must be positive or None")
-    if max_rows is None:
-        raise ValueError("Unbounded preprocessing is disabled. Supply an explicit max_rows limit.")
+        raise FileNotFoundError(source)
+    if chunksize <= 0 or (max_rows is not None and max_rows <= 0):
+        raise ValueError("chunksize and max_rows must be positive when supplied")
     destination.mkdir(parents=True, exist_ok=True)
     chunk_root = destination / "chunks"
     chunk_root.mkdir(parents=True, exist_ok=True)
+    stem = source.name[:-7] if source.name.lower().endswith(".csv.gz") else source.stem
+    output_path = destination / f"{stem}_processed.csv"
+    temp_path = destination / f".{stem}_processed.tmp"
+    temp_path.unlink(missing_ok=True)
 
-    source_stem = source.name[:-7] if source.name.lower().endswith(".csv.gz") else source.stem
-    output_path = destination / f"{source_stem}_processed.csv"
-    temp_path = destination / f".{source_stem}_processed.tmp"
-    index_path = destination / f"{source_stem}_chunk_report.json"
-    if temp_path.exists():
-        temp_path.unlink()
-
-    chunk_reports: list[dict[str, Any]] = []
-    chunk_paths: list[Path] = []
-    output_columns: list[str] = []
-    total_rows = 0
+    reports, paths, columns, rows = [], [], [], 0
     try:
-        for chunk_number, chunk in enumerate(
-            pd.read_csv(source, chunksize=chunksize, nrows=max_rows, low_memory=False), start=1
-        ):
-            chunk_name = f"{source.stem}_chunk_{chunk_number:06d}"
+        for number, chunk in enumerate(pd.read_csv(source, chunksize=chunksize, nrows=max_rows, low_memory=False), start=1):
+            name = f"{stem}_chunk_{number:06d}"
             report = run_dataframe(
-                chunk,
-                file_name=chunk_name,
-                output_dir=chunk_root / chunk_name,
-                model=model or config.PREPROCESSING_MODEL,
-                max_iterations=max_iterations,
-                allow_imputation=allow_imputation,
-                context_metadata=context_metadata,
+                chunk, file_name=name, output_dir=chunk_root / name,
+                allow_imputation=allow_imputation, context_metadata=context_metadata,
             )
-            processed_chunk = Path(report["output_file"])
-            if not processed_chunk.is_file():
-                raise RuntimeError(f"Chunk {chunk_number} did not produce an output CSV")
-            # Only read headers here. Full chunk data is loaded one chunk at a time
-            # during the final streaming pass.
-            header = list(pd.read_csv(processed_chunk, nrows=0).columns)
-            for column in header:
-                if column not in output_columns:
-                    output_columns.append(column)
-            chunk_paths.append(processed_chunk)
-            total_rows += len(chunk)
-            # Keep only compact metadata in RAM. Full action histories and profiles
-            # already live in each chunk's JSON report on disk.
-            chunk_reports.append({
-                "chunk": chunk_number,
-                "rows": len(chunk),
-                "run_id": report["run_id"],
+            processed = Path(report["output_file"])
+            header = list(pd.read_csv(processed, nrows=0).columns)
+            columns.extend(c for c in header if c not in columns)
+            paths.append(processed)
+            rows += len(chunk)
+            reports.append({
+                "chunk": number, "rows": len(chunk), "run_id": report["run_id"],
                 "action_count": len(report.get("actions", [])),
                 "chunk_report": report["report_file"],
             })
-            del chunk, report, processed_chunk, header
+            del chunk, report
             gc.collect()
 
-        if not chunk_paths:
+        for i, path in enumerate(paths):
+            data = pd.read_csv(path, low_memory=False).reindex(columns=columns)
+            data.to_csv(temp_path, mode="a" if i else "w", header=(i == 0), index=False)
+            del data
+            gc.collect()
+        if not paths:
             pd.read_csv(source, nrows=0).to_csv(temp_path, index=False)
-        else:
-            for i, processed_chunk in enumerate(chunk_paths):
-                output_chunk = pd.read_csv(processed_chunk, low_memory=False)
-                output_chunk = output_chunk.reindex(columns=output_columns)
-                output_chunk.to_csv(
-                    temp_path,
-                    mode="a" if i else "w",
-                    header=(i == 0),
-                    index=False,
-                )
-                del output_chunk
-                gc.collect()
         temp_path.replace(output_path)
     except Exception:
-        if temp_path.exists():
-            temp_path.unlink()
+        temp_path.unlink(missing_ok=True)
         raise
 
     summary = {
-        "input_file": str(source.resolve()),
-        "output_file": str(output_path.resolve()),
-        "chunksize": chunksize,
-        "max_rows": max_rows,
-        "rows_limit_reached": total_rows >= max_rows,
-        "scope": "bounded_prefix_only",
-        "chunks_processed": len(chunk_reports),
-        "rows_processed": total_rows,
-        "output_columns": output_columns,
-        "model": model,
-        "allow_imputation": allow_imputation,
-        "chunk_reports": chunk_reports,
-        "note": (
-            "Each chunk is planned independently. Learned thresholds and action "
-            "choices may vary between chunks; inspect reports before downstream use."
-        ),
+        "input_file": str(source.resolve()), "output_file": str(output_path.resolve()),
+        "chunksize": chunksize, "max_rows": max_rows,
+        "scope": "all_rows" if max_rows is None else "bounded_prefix",
+        "chunks_processed": len(reports), "rows_processed": rows,
+        "output_columns": columns, "decision_engine": "deterministic_rules_v1",
+        "allow_imputation": allow_imputation, "chunk_reports": reports,
+        "note": "Chunk-local thresholds and profiles may differ. Review candidate records before classifier training.",
     }
-    index_path.write_text(json.dumps(summary, indent=2, default=str), encoding="utf-8")
-    summary["summary_report"] = str(index_path.resolve())
+    summary_path = destination / f"{stem}_chunk_report.json"
+    summary_path.write_text(json.dumps(summary, indent=2, default=str), encoding="utf-8")
+    summary["summary_report"] = str(summary_path.resolve())
     return summary
-
-
-def main() -> None:
-    parser = argparse.ArgumentParser(description="Chunked TrippinnI preprocessing runner")
-    parser.add_argument("input_csv", help="Path to source CSV (source remains unchanged)")
-    parser.add_argument("--output-dir", default="outputs/preprocessing")
-    parser.add_argument("--chunksize", type=int, default=50_000)
-    parser.add_argument("--model", default=config.PREPROCESSING_MODEL)
-    parser.add_argument("--max-iterations", type=int, default=5)
-    parser.add_argument("--max-rows", type=int, default=5_000, help="Maximum prefix rows to process; unbounded scans are disabled")
-    parser.add_argument(
-        "--allow-imputation",
-        action="store_true",
-        help="Enable numeric median imputation for this run; review is required",
-    )
-    args = parser.parse_args()
-    result = run_csv_chunks(
-        args.input_csv,
-        output_dir=args.output_dir,
-        chunksize=args.chunksize,
-        model=args.model,
-        max_iterations=args.max_iterations,
-        allow_imputation=args.allow_imputation,
-        max_rows=args.max_rows,
-    )
-    print(json.dumps(result, indent=2, default=str))
-
-
-if __name__ == "__main__":
-    main()
