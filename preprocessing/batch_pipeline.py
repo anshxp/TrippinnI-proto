@@ -245,12 +245,15 @@ def run_directory_batch(
                      "processing_status": "pending"}
             state["tables"][relative_key] = entry
 
-        if entry.get("processing_status") == "complete" and extracted.is_file():
-            saved = entry.get("table_result")
-            if saved:
-                table_results.append(saved)
-                logger.info("SKIP complete table=%s", relative_key)
-                continue
+        saved_result = entry.get("table_result")
+        saved_output = (Path(saved_result["preprocessing"]["output_file"])
+                        if saved_result and saved_result.get("preprocessing", {}).get("output_file")
+                        else None)
+        if (entry.get("processing_status") == "complete" and extracted.is_file()
+                and saved_result and saved_output and saved_output.is_file()):
+            table_results.append(saved_result)
+            logger.info("SKIP complete table=%s", relative_key)
+            continue
 
         logger.info("START table=%s", relative_key)
         try:
@@ -325,9 +328,6 @@ def run_directory_batch(
                 "sampling_mode": sampling_mode,
                 "preprocessing": preprocessing,
             }
-            entry.update({"processing_status": "complete", "table_result": table_result,
-                          "completed_at": datetime.now(timezone.utc).isoformat()})
-            _save_state(state_path, state)
             table_results.append(table_result)
             _append_jsonl(audit_path, {
                 "source_relative_path": relative_key, "source_fingerprint": fingerprint,
@@ -357,6 +357,9 @@ def run_directory_batch(
                         "clinical_validity": "not_established",
                         "label_status": "candidate_requires_review",
                     })
+            entry.update({"processing_status": "complete", "table_result": table_result,
+                          "completed_at": datetime.now(timezone.utc).isoformat()})
+            _save_state(state_path, state)
             logger.info("COMPLETE table=%s rows_processed=%d",
                         relative_key, preprocessing["rows_processed"])
         except Exception as exc:
