@@ -63,7 +63,7 @@ def main() -> int:
         random_seed=args.random_seed,
     )
     print(json.dumps(result, indent=2, default=str))
-    print("\\nFinished recursive extraction and preprocessing.")
+    print("Finished recursive extraction and preprocessing.")
     print("Read multi_table_manifest.json for per-table row counts and sampling methods.")
     print("Classifier records are candidates for review, not validated ground-truth labels.")
     return 0
