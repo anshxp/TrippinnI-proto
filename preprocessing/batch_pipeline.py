@@ -390,6 +390,7 @@ def run_directory_batch(
         "source_root": str(source),
         "output_root": str(root),
         "batch_fraction": batch_fraction,
+        "profile_mode": profile_mode,
         "decision_engine": "deterministic_rules_v1",
         "sampling_mode": "mimic_patient_cohort" if mimic_mode else "per_file_row_fraction",
         "random_seed": random_seed if mimic_mode else None,
