@@ -9,7 +9,6 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
-import shutil
 from pathlib import Path
 from typing import Any
 
@@ -72,19 +71,20 @@ def _write_filtered(
     source: Path, destination: Path, *, key_columns: list[str],
     selected_subjects: set[str], selected_hadm: set[str],
     selected_stays: set[str], chunksize: int,
-) -> int:
+) -> tuple[int, int]:
     destination.parent.mkdir(parents=True, exist_ok=True)
     temp = destination.with_suffix(destination.suffix + ".tmp")
     temp.unlink(missing_ok=True)
-    rows = 0
+    rows = source_rows = 0
     try:
         for frame in pd.read_csv(source, chunksize=chunksize, low_memory=False):
+            source_rows += len(frame)
             mask = pd.Series(False, index=frame.index)
             if "subject_id" in key_columns:
                 mask |= frame["subject_id"].astype("string").isin(selected_subjects)
-            elif "hadm_id" in key_columns:
+            if "hadm_id" in key_columns and selected_hadm:
                 mask |= frame["hadm_id"].astype("string").isin(selected_hadm)
-            elif "stay_id" in key_columns:
+            if "stay_id" in key_columns and selected_stays:
                 mask |= frame["stay_id"].astype("string").isin(selected_stays)
             selected = frame.loc[mask] if key_columns else frame
             if not selected.empty:
@@ -97,7 +97,7 @@ def _write_filtered(
     except Exception:
         temp.unlink(missing_ok=True)
         raise
-    return rows
+    return source_rows, rows
 
 
 def _write_row_fraction(
@@ -212,16 +212,23 @@ def run_directory_batch(
             else:
                 sampling_mode = "reference_table_full_copy" if not key_columns else "key_table_no_matching_parent"
             if sampling_mode == "reference_table_full_copy":
+                # Stream reference tables to plain CSV; do not copy compressed bytes
+                # into a .csv filename.
                 extracted.parent.mkdir(parents=True, exist_ok=True)
-                shutil.copyfile(source_file, extracted)
-                rows_extracted = count_csv_rows(extracted, chunksize=extraction_chunksize)
+                source_rows = rows_extracted = 0
+                for frame in pd.read_csv(source_file, chunksize=extraction_chunksize, low_memory=False):
+                    frame.to_csv(extracted, mode="a" if source_rows else "w",
+                                 header=(source_rows == 0), index=False)
+                    source_rows += len(frame)
+                    rows_extracted += len(frame)
+                if source_rows == 0:
+                    pd.read_csv(source_file, nrows=0).to_csv(extracted, index=False)
             else:
-                rows_extracted = _write_filtered(
+                source_rows, rows_extracted = _write_filtered(
                     source_file, extracted, key_columns=key_columns,
                     selected_subjects=selected_subjects, selected_hadm=selected_hadm,
                     selected_stays=selected_stays, chunksize=extraction_chunksize,
                 )
-            source_rows = count_csv_rows(source_file, chunksize=extraction_chunksize)
         else:
             source_rows, rows_extracted = _write_row_fraction(
                 source_file, extracted, fraction=batch_fraction,
