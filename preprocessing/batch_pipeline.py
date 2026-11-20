@@ -9,6 +9,9 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import logging
+import shutil
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
@@ -33,6 +36,13 @@ def _fingerprint(path: Path) -> str:
     return hashlib.sha256(
         f"{path.resolve()}|{stat.st_size}|{stat.st_mtime_ns}".encode()
     ).hexdigest()
+
+
+def _save_state(path: Path, state: dict[str, Any]) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temp = path.with_suffix(path.suffix + ".tmp")
+    temp.write_text(json.dumps(state, indent=2, default=str), encoding="utf-8")
+    temp.replace(path)
 
 
 def _append_jsonl(path: Path, record: dict[str, Any]) -> None:
@@ -133,7 +143,7 @@ def run_directory_batch(
     source_root: str | Path, *, output_root: str | Path,
     batch_fraction: float = 0.10, extraction_chunksize: int = 50_000,
     preprocessing_chunksize: int = 50_000, allow_imputation: bool = False,
-    random_seed: int = 42,
+    random_seed: int = 42, resume: bool = False,
 ) -> dict[str, Any]:
     """Extract/process every CSV recursively; use a patient cohort when MIMIC keys exist."""
     source = Path(source_root).expanduser().resolve()
@@ -149,9 +159,35 @@ def run_directory_batch(
     files = sorted(p for p in source.rglob("*") if p.is_file() and _is_csv(p))
     if not files:
         raise FileNotFoundError(f"No .csv or .csv.gz files found recursively under {source}")
+    state_path = root / "run_state.json"
+    log_path = root / "logs" / "pipeline.log"
     if root.exists() and any(root.iterdir()):
-        raise FileExistsError(f"Output directory is not empty: {root}. Choose a new output directory.")
+        if not resume or not state_path.is_file():
+            raise FileExistsError(
+                f"Output directory is not empty: {root}. Use --resume only if it contains "
+                "this pipeline's run_state.json, or choose a new output directory."
+            )
+    elif resume:
+        raise FileNotFoundError(f"Cannot resume: no existing run state at {state_path}")
     root.mkdir(parents=True, exist_ok=True)
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    logger = logging.getLogger("trippinni.batch")
+    logger.setLevel(logging.INFO)
+    logger.handlers.clear()
+    handler = logging.FileHandler(log_path, encoding="utf-8")
+    handler.setFormatter(logging.Formatter("%(asctime)s | %(levelname)s | %(message)s"))
+    logger.addHandler(handler)
+    logger.propagate = False
+    if state_path.exists():
+        state = json.loads(state_path.read_text(encoding="utf-8"))
+        if Path(state.get("source_root", "")).resolve() != source:
+            raise ValueError("Resume source directory differs from the original run.")
+        logger.info("Resuming existing run at %s", root)
+    else:
+        state = {"version": 1, "source_root": str(source), "output_root": str(root),
+                 "started_at": datetime.now(timezone.utc).isoformat(), "tables": {}}
+        _save_state(state_path, state)
+        logger.info("Started new run. Discovered %d CSV files.", len(files))
 
     # Identify the MIMIC-IV patient table. If present, sample patients once and
     # derive the encounter/stay key sets used by every dependent table.
@@ -192,96 +228,147 @@ def run_directory_batch(
             )
 
     table_results: list[dict[str, Any]] = []
+    failures: list[dict[str, str]] = []
     audit_path = root / "audit" / "batch_audit.jsonl"
     training_path = root / "classifier_training" / "algorithm_selection_records.jsonl"
 
     for source_file in files:
         relative = source_file.relative_to(source)
+        relative_key = str(relative)
+        fingerprint = _fingerprint(source_file)
         extracted_rel = relative.with_name(_stem(source_file) + ".csv") if relative.name.lower().endswith(".csv.gz") else relative
         extracted = root / "extracted" / extracted_rel
-        columns = _header(source_file)
-        key_columns = [key for key in ("subject_id", "hadm_id", "stay_id") if key in columns]
-
-        if mimic_mode:
-            if "subject_id" in key_columns:
-                sampling_mode = "selected_subject_id_cohort"
-            elif "hadm_id" in key_columns and selected_hadm:
-                sampling_mode = "selected_hadm_id_cohort"
-            elif "stay_id" in key_columns and selected_stays:
-                sampling_mode = "selected_stay_id_cohort"
-            else:
-                sampling_mode = "reference_table_full_copy" if not key_columns else "key_table_no_matching_parent"
-            if sampling_mode == "reference_table_full_copy":
-                # Stream reference tables to plain CSV; do not copy compressed bytes
-                # into a .csv filename.
-                extracted.parent.mkdir(parents=True, exist_ok=True)
-                source_rows = rows_extracted = 0
-                for frame in pd.read_csv(source_file, chunksize=extraction_chunksize, low_memory=False):
-                    frame.to_csv(extracted, mode="a" if source_rows else "w",
-                                 header=(source_rows == 0), index=False)
-                    source_rows += len(frame)
-                    rows_extracted += len(frame)
-                if source_rows == 0:
-                    pd.read_csv(source_file, nrows=0).to_csv(extracted, index=False)
-            else:
-                source_rows, rows_extracted = _write_filtered(
-                    source_file, extracted, key_columns=key_columns,
-                    selected_subjects=selected_subjects, selected_hadm=selected_hadm,
-                    selected_stays=selected_stays, chunksize=extraction_chunksize,
-                )
-        else:
-            source_rows, rows_extracted = _write_row_fraction(
-                source_file, extracted, fraction=batch_fraction,
-                chunksize=extraction_chunksize,
-            )
-            sampling_mode = "deterministic_first_row_fraction_per_file"
-
         processed_dir = root / "processed" / relative.parent / _stem(source_file)
-        preprocessing = run_csv_chunks(
-            extracted, output_dir=processed_dir, chunksize=preprocessing_chunksize,
-            max_rows=None, allow_imputation=allow_imputation,
-        )
-        table_result = {
-            "source_relative_path": str(relative),
-            "source_fingerprint": _fingerprint(source_file),
-            "source_rows": source_rows,
-            "extracted_relative_path": str(extracted.relative_to(root)),
-            "rows_extracted": rows_extracted,
-            "rows_processed": preprocessing["rows_processed"],
-            "sampling_mode": sampling_mode,
-            "preprocessing": preprocessing,
-        }
-        table_results.append(table_result)
-        _append_jsonl(audit_path, {
-            "source_relative_path": str(relative),
-            "source_fingerprint": table_result["source_fingerprint"],
-            "sampling_mode": sampling_mode, "source_rows": source_rows,
-            "rows_extracted": rows_extracted,
-            "rows_processed": preprocessing["rows_processed"],
-            "row_count_preserved": rows_extracted == preprocessing["rows_processed"],
-            "clinical_validity": "not_established",
-        })
-        for chunk in preprocessing["chunk_reports"]:
-            report = json.loads(Path(chunk["chunk_report"]).read_text(encoding="utf-8"))
-            for action in report.get("actions", []):
-                _append_jsonl(training_path, {
-                    "record_id": f"{report['run_id']}:{action.get('action_id', action.get('iteration'))}",
-                    "run_id": report["run_id"],
-                    "source_table": str(relative),
-                    "metadata_features": action.get("before_profile", report.get("before_profile")),
-                    "selected_algorithm": action.get("action"),
-                    "algorithm_module": action.get("module"),
-                    "parameters": action.get("parameters", {}),
-                    "selection_rule_id": action.get("rule_id"),
-                    "selection_rationale": action.get("rationale"),
-                    "execution_status": action.get("status"),
-                    "before_profile": action.get("before_profile"),
-                    "after_profile": action.get("after_profile"),
-                    "changed_records": action.get("changed_records", 0),
-                    "requires_human_validation": True,
-                    "clinical_validity": "not_established",
-                    "label_status": "candidate_requires_review",
-                })
+        entry = state["tables"].get(relative_key, {})
+        if entry.get("source_fingerprint") != fingerprint:
+            entry = {"source_fingerprint": fingerprint, "extraction_status": "pending",
+                     "processing_status": "pending"}
+            state["tables"][relative_key] = entry
+
+        if entry.get("processing_status") == "complete" and extracted.is_file():
+            saved = entry.get("table_result")
+            if saved:
+                table_results.append(saved)
+                logger.info("SKIP complete table=%s", relative_key)
+                continue
+
+        logger.info("START table=%s", relative_key)
+        try:
+            if entry.get("extraction_status") == "complete" and extracted.is_file():
+                source_rows = int(entry["source_rows"])
+                rows_extracted = int(entry["rows_extracted"])
+                sampling_mode = entry["sampling_mode"]
+                logger.info("RESUME table=%s stage=preprocessing", relative_key)
+            else:
+                columns = _header(source_file)
+                key_columns = [key for key in ("subject_id", "hadm_id", "stay_id") if key in columns]
+                if mimic_mode:
+                    if "subject_id" in key_columns:
+                        sampling_mode = "selected_subject_id_cohort"
+                    elif "hadm_id" in key_columns and selected_hadm:
+                        sampling_mode = "selected_hadm_id_cohort"
+                    elif "stay_id" in key_columns and selected_stays:
+                        sampling_mode = "selected_stay_id_cohort"
+                    else:
+                        sampling_mode = "reference_table_full_copy" if not key_columns else "key_table_no_matching_parent"
+                    if sampling_mode == "reference_table_full_copy":
+                        extracted.parent.mkdir(parents=True, exist_ok=True)
+                        temp_extracted = extracted.with_suffix(extracted.suffix + ".tmp")
+                        temp_extracted.unlink(missing_ok=True)
+                        source_rows = 0
+                        try:
+                            for frame in pd.read_csv(source_file, chunksize=extraction_chunksize, low_memory=False):
+                                frame.to_csv(temp_extracted, mode="a" if source_rows else "w",
+                                             header=(source_rows == 0), index=False)
+                                source_rows += len(frame)
+                            if source_rows == 0:
+                                pd.read_csv(source_file, nrows=0).to_csv(temp_extracted, index=False)
+                            temp_extracted.replace(extracted)
+                        except Exception:
+                            temp_extracted.unlink(missing_ok=True)
+                            raise
+                        rows_extracted = source_rows
+                    else:
+                        source_rows, rows_extracted = _write_filtered(
+                            source_file, extracted, key_columns=key_columns,
+                            selected_subjects=selected_subjects, selected_hadm=selected_hadm,
+                            selected_stays=selected_stays, chunksize=extraction_chunksize,
+                        )
+                else:
+                    source_rows, rows_extracted = _write_row_fraction(
+                        source_file, extracted, fraction=batch_fraction,
+                        chunksize=extraction_chunksize,
+                    )
+                    sampling_mode = "deterministic_first_row_fraction_per_file"
+                entry.update({"extraction_status": "complete", "source_rows": source_rows,
+                              "rows_extracted": rows_extracted, "sampling_mode": sampling_mode,
+                              "extracted_relative_path": str(extracted.relative_to(root))})
+                _save_state(state_path, state)
+                logger.info("EXTRACTED table=%s source_rows=%d extracted_rows=%d",
+                            relative_key, source_rows, rows_extracted)
+
+            if entry.get("processing_status") != "complete" and processed_dir.exists():
+                shutil.rmtree(processed_dir)
+            entry["processing_status"] = "running"
+            _save_state(state_path, state)
+            preprocessing = run_csv_chunks(
+                extracted, output_dir=processed_dir, chunksize=preprocessing_chunksize,
+                max_rows=None, allow_imputation=allow_imputation,
+            )
+            table_result = {
+                "source_relative_path": relative_key,
+                "source_fingerprint": fingerprint,
+                "source_rows": source_rows,
+                "extracted_relative_path": str(extracted.relative_to(root)),
+                "rows_extracted": rows_extracted,
+                "rows_processed": preprocessing["rows_processed"],
+                "sampling_mode": sampling_mode,
+                "preprocessing": preprocessing,
+            }
+            entry.update({"processing_status": "complete", "table_result": table_result,
+                          "completed_at": datetime.now(timezone.utc).isoformat()})
+            _save_state(state_path, state)
+            table_results.append(table_result)
+            _append_jsonl(audit_path, {
+                "source_relative_path": relative_key, "source_fingerprint": fingerprint,
+                "sampling_mode": sampling_mode, "source_rows": source_rows,
+                "rows_extracted": rows_extracted,
+                "rows_processed": preprocessing["rows_processed"],
+                "row_count_preserved": rows_extracted == preprocessing["rows_processed"],
+                "clinical_validity": "not_established",
+            })
+            for chunk in preprocessing["chunk_reports"]:
+                report = json.loads(Path(chunk["chunk_report"]).read_text(encoding="utf-8"))
+                for action in report.get("actions", []):
+                    _append_jsonl(training_path, {
+                        "record_id": f"{report['run_id']}:{action.get('action_id', action.get('iteration'))}",
+                        "run_id": report["run_id"], "source_table": relative_key,
+                        "metadata_features": action.get("before_profile", report.get("before_profile")),
+                        "selected_algorithm": action.get("action"),
+                        "algorithm_module": action.get("module"),
+                        "parameters": action.get("parameters", {}),
+                        "selection_rule_id": action.get("rule_id"),
+                        "selection_rationale": action.get("rationale"),
+                        "execution_status": action.get("status"),
+                        "before_profile": action.get("before_profile"),
+                        "after_profile": action.get("after_profile"),
+                        "changed_records": action.get("changed_records", 0),
+                        "requires_human_validation": True,
+                        "clinical_validity": "not_established",
+                        "label_status": "candidate_requires_review",
+                    })
+            logger.info("COMPLETE table=%s rows_processed=%d",
+                        relative_key, preprocessing["rows_processed"])
+        except Exception as exc:
+            entry["processing_status"] = "failed"
+            entry["last_error"] = f"{type(exc).__name__}: {exc}"
+            entry["failed_at"] = datetime.now(timezone.utc).isoformat()
+            _save_state(state_path, state)
+            logger.exception("FAILED table=%s stage=%s", relative_key,
+                             "preprocessing" if entry.get("extraction_status") == "complete" else "extraction")
+            failures.append({"source_relative_path": relative_key,
+                             "error": entry["last_error"]})
+            continue
 
     manifest = {
         "source_root": str(source),
@@ -295,6 +382,13 @@ def run_directory_batch(
         "source_files_discovered": len(files),
         "tables": table_results,
         "tables_processed": len(table_results),
+        "tables_failed": failures,
+        "tables_failed_count": len(failures),
+        "run_status": "completed_with_errors" if failures else "completed",
+        "resume_supported": True,
+        "resume_granularity": "table_stage; a failed preprocessing table restarts from its extracted CSV",
+        "log_file": str(log_path),
+        "state_file": str(state_path),
         "rows_extracted_total": sum(item["rows_extracted"] for item in table_results),
         "rows_processed_total": sum(item["rows_processed"] for item in table_results),
         "training_label_status": "candidate_requires_review",
@@ -310,6 +404,13 @@ def run_directory_batch(
     }
     manifest_path = root / "multi_table_manifest.json"
     manifest_path.write_text(json.dumps(manifest, indent=2, default=str), encoding="utf-8")
+    state["run_status"] = manifest["run_status"]
+    state["updated_at"] = datetime.now(timezone.utc).isoformat()
+    _save_state(state_path, state)
+    logger.info("RUN FINISHED status=%s completed=%d failed=%d",
+                manifest["run_status"], len(table_results), len(failures))
+    handler.close()
+    logger.removeHandler(handler)
     return {"manifest": str(manifest_path), **manifest}
 
 
