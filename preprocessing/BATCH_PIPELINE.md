@@ -83,3 +83,27 @@ labels. A successful execution or a flagged outlier does not establish clinical
 validity. Validate the extracted cohort and preprocessing outputs before
 classifier training. Keep source data and generated patient-level artifacts
 outside Git.
+
+
+## Logging and safe resume
+
+Each run writes:
+- `logs/pipeline.log`: timestamped progress and full exception traces.
+- `run_state.json`: per-table source fingerprint and extraction/preprocessing status.
+- `multi_table_manifest.json`: final summary, including failed tables.
+
+Resume using the same output directory and add `--resume`:
+
+```powershell
+python app.py --dataset-type csv --dataset-path "C:\Users\Admin\Documents\physionet.org" --output-root "C:\Users\Admin\Documents\TrippinnI-mimic-10pct" --extraction-chunksize 5000 --chunksize 5000 --resume
+```
+
+Completed tables are skipped. If extraction completed but preprocessing did not,
+the extracted CSV is reused. If preprocessing failed partway through a table,
+that table's preprocessing is rebuilt from its extracted CSV; it does not resume
+inside an individual preprocessing chunk. Changed source files are reprocessed.
+
+Malformed CSV records are not silently discarded. The affected table is marked
+failed with the parser error in the log; other tables continue. Correct or
+re-export that source table, then run again with `--resume`. The failed table
+will be retried. Review failed-table status before using outputs downstream.
