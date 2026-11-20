@@ -1,8 +1,74 @@
+# Local datasets and generated clinical/data artifacts (never commit PHI)
 data/raw/synthea/*
+data/raw/
+data/processed/
+data/interim/
+data/external/
+datasets/
+manual_batches/
+classifier_training/
+audit/
+artifacts/
+generated/
+outputs/
+output/
+reports/generated/
+logs/
+*.log
+*.jsonl
+*.parquet
+*.feather
+*.pkl
+*.pickle
+*.joblib
+*.sqlite
+*.db
+*.tmp
+*.temp
+*.bak
+*.backup
 
-# Virtual environment
+# Generated profiling, metadata, quality and audit outputs
+**/profiling/reports/
+**/quality/reports/
+**/preprocessing/archive/
+**/preprocessing/*_processed.csv
+**/*_preprocessing_report.json
+**/*_chunk_report.json
+**/batch_manifest.json
+**/batch_audit.jsonl
+**/algorithm_selection_records.jsonl
+**/*_action_log.jsonl
+**/*_changes.jsonl
+
+# Large clinical source files
+*.csv.gz
+*.parquet.gzip
+
+# Virtual environments and local configuration
 venv/
+.venv/
+env/
+ENV/
+.env
+.env.*
+!.env.example
+secrets/
+*.pem
+*.key
 
-# Python cache
+# Python caches and test/tool caches
 __pycache__/
 *.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+.ipynb_checkpoints/
+
+# OS/editor files
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
