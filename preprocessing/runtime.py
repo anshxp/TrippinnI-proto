@@ -41,13 +41,13 @@ def _select_actions(profile: dict[str, Any], specs: list[Any], *, allow_imputati
 
 def run_dataframe(
     df: pd.DataFrame, *, file_name: str, output_dir: str | Path,
-    model: str | None = None, max_iterations: int = 5,
+    model: str | None = None, max_iterations: int | None = None,
     allow_imputation: bool = False, context_metadata: dict | None = None,
     selected_actions: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Profile -> deterministic allow-listed actions -> re-profile -> audit."""
-    if max_iterations < 1:
-        raise ValueError("max_iterations must be positive")
+    if max_iterations is not None and max_iterations < 1:
+        raise ValueError("max_iterations must be positive when supplied")
     root = Path(output_dir)
     root.mkdir(parents=True, exist_ok=True)
     archive = root / "archive"
@@ -63,7 +63,8 @@ def run_dataframe(
     actions: list[dict[str, Any]] = []
     seen: set[tuple[str, str]] = set()
 
-    for iteration, decision in enumerate(decisions[:max_iterations], start=1):
+    selected_decisions = decisions if max_iterations is None else decisions[:max_iterations]
+    for iteration, decision in enumerate(selected_decisions, start=1):
         name = decision.get("action")
         params = decision.get("parameters") or {}
         if name not in spec_map or name not in handlers:
