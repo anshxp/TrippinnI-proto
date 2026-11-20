@@ -12,7 +12,7 @@ import pandas as pd
 from preprocessing.registry import build_action_registry, profile_dataframe
 
 
-def _select_actions(profile: dict[str, Any], specs: list[Any], *, allow_imputation: bool) -> list[dict[str, Any]]:
+def _select_actions(profile: dict[str, Any], specs: list[Any], *, allow_imputation: bool, profile_mode: str = "fast") -> list[dict[str, Any]]:
     """Transparent conservative rules. These are candidate decisions, not clinical labels."""
     by_name = {spec.name: spec for spec in specs}
     decisions: list[dict[str, Any]] = []
@@ -21,12 +21,15 @@ def _select_actions(profile: dict[str, Any], specs: list[Any], *, allow_imputati
         "rule_id": "DQ-MISS-001",
         "rationale": "Always profile column-level missingness before considering mutation.",
     })
-    decisions.append({
-        "action": "report_exact_duplicates", "parameters": {},
-        "rule_id": "DQ-DUP-001",
-        "rationale": "Always quantify exact duplicate candidates; this action does not delete rows.",
-    })
+    if profile_mode == "full":
+        decisions.append({
+            "action": "report_exact_duplicates", "parameters": {},
+            "rule_id": "DQ-DUP-001",
+            "rationale": "Quantify exact duplicate candidates; this action does not delete rows.",
+        })
     for column, details in profile.get("columns", {}).items():
+        if profile_mode != "full":
+            continue
         numeric = details.get("numeric_summary")
         if numeric and details.get("distinct_non_null", 0) >= 4:
             decisions.append({
@@ -44,6 +47,7 @@ def run_dataframe(
     model: str | None = None, max_iterations: int | None = None,
     allow_imputation: bool = False, context_metadata: dict | None = None,
     selected_actions: list[dict[str, Any]] | None = None,
+    profile_mode: str = "fast",
 ) -> dict[str, Any]:
     """Profile -> deterministic allow-listed actions -> re-profile -> audit."""
     if max_iterations is not None and max_iterations < 1:
@@ -53,10 +57,12 @@ def run_dataframe(
     archive = root / "archive"
     archive.mkdir(parents=True, exist_ok=True)
     specs, handlers = build_action_registry()
-    working = df.copy(deep=True)
-    before_profile = profile_dataframe(working)
+    if profile_mode not in {"fast", "full"}:
+        raise ValueError("profile_mode must be 'fast' or 'full'")
+    working = df if profile_mode == "fast" else df.copy(deep=True)
+    before_profile = profile_dataframe(working, mode=profile_mode)
     decisions = selected_actions if selected_actions is not None else _select_actions(
-        before_profile, specs, allow_imputation=allow_imputation
+        before_profile, specs, allow_imputation=allow_imputation, profile_mode=profile_mode
     )
     spec_map = {s.name: s for s in specs}
     run_id = uuid.uuid4().hex
@@ -86,7 +92,7 @@ def run_dataframe(
         seen.add(key)
         action_id = uuid.uuid4().hex
         started = time.time()
-        before = profile_dataframe(working)
+        before = before_profile if profile_mode == "fast" else profile_dataframe(working, mode=profile_mode)
         try:
             result = handlers[name](
                 working, parameters=params, archive_dir=archive,
@@ -95,7 +101,7 @@ def run_dataframe(
             status = result.get("status", "failed")
             if status == "committed":
                 working = result.get("dataset", working)
-            after = profile_dataframe(working)
+            after = before_profile if profile_mode == "fast" else profile_dataframe(working, mode=profile_mode)
             record = {
                 "run_id": run_id, "action_id": action_id, "iteration": iteration,
                 "action": name, "module": spec.module, "status": status,
@@ -129,10 +135,10 @@ def run_dataframe(
     temp_path = output_path.with_suffix(".tmp")
     working.to_csv(temp_path, index=False)
     temp_path.replace(output_path)
-    final_profile = profile_dataframe(working)
+    final_profile = before_profile if profile_mode == "fast" else profile_dataframe(working, mode=profile_mode)
     report = {
         "run_id": run_id, "file_name": file_name,
-        "decision_engine": "deterministic_rules_v1",
+        "decision_engine": "deterministic_rules_v1", "profile_mode": profile_mode,
         "model": None, "rows_before": len(df), "rows_after": len(working),
         "row_count_preserved": len(df) == len(working),
         "context_metadata_tables": list((context_metadata or {}).get("tables", {}).keys()),
