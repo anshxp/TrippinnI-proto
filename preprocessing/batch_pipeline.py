@@ -81,7 +81,8 @@ def _collect_child_keys(
 def _write_filtered(
     source: Path, destination: Path, *, key_columns: list[str],
     selected_subjects: set[str], selected_hadm: set[str],
-    selected_stays: set[str], chunksize: int,
+    selected_stays: set[str], chunksize: int, logger: logging.Logger | None = None,
+    table_name: str = "",
 ) -> tuple[int, int]:
     destination.parent.mkdir(parents=True, exist_ok=True)
     temp = destination.with_suffix(destination.suffix + ".tmp")
@@ -102,6 +103,11 @@ def _write_filtered(
                 selected.to_csv(temp, mode="a" if rows else "w",
                                 header=(rows == 0), index=False)
                 rows += len(selected)
+            if logger:
+                logger.info(
+                    "EXTRACTION_PROGRESS table=%s source_rows_scanned=%d rows_selected=%d",
+                    table_name, source_rows, rows,
+                )
         if rows == 0:
             pd.read_csv(source, nrows=0).to_csv(temp, index=False)
         temp.replace(destination)
@@ -305,6 +311,10 @@ def run_directory_batch(
                                 frame.to_csv(temp_extracted, mode="a" if source_rows else "w",
                                              header=(source_rows == 0), index=False)
                                 source_rows += len(frame)
+                                logger.info(
+                                    "EXTRACTION_PROGRESS table=%s source_rows_scanned=%d rows_selected=%d",
+                                    relative_key, source_rows, source_rows,
+                                )
                             if source_rows == 0:
                                 pd.read_csv(source_file, nrows=0).to_csv(temp_extracted, index=False)
                             temp_extracted.replace(extracted)
@@ -317,6 +327,7 @@ def run_directory_batch(
                             source_file, extracted, key_columns=key_columns,
                             selected_subjects=selected_subjects, selected_hadm=selected_hadm,
                             selected_stays=selected_stays, chunksize=extraction_chunksize,
+                            logger=logger, table_name=relative_key,
                         )
                 else:
                     source_rows, rows_extracted = _write_row_fraction(
