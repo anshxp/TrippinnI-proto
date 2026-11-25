@@ -154,11 +154,23 @@ def run_directory_batch(
 ) -> dict[str, Any]:
     """Extract/process every CSV recursively; use a patient cohort when MIMIC keys exist."""
     source = Path(source_root).expanduser().resolve()
-    root = Path(output_root).expanduser().resolve()
+    base_root = Path(output_root).expanduser().resolve()
+    root = base_root
     if not source.is_dir():
         raise NotADirectoryError(f"Dataset path must be a directory: {source}")
-    if root == source or source in root.parents:
+    if base_root == source or source in base_root.parents:
         raise ValueError("Output directory must be outside the source dataset directory.")
+    if not resume:
+        base_root.mkdir(parents=True, exist_ok=True)
+        existing_runs = [p for p in base_root.iterdir() if p.is_dir() and p.name.startswith("run_")]
+        run_numbers = [int(p.name.split("_")[1].split("-")[0]) for p in existing_runs
+                       if len(p.name.split("_")) > 1 and p.name.split("_")[1].split("-")[0].isdigit()]
+        next_number = max(run_numbers or [0]) + 1
+        timestamp = datetime.now().astimezone().strftime("%Y%m%d_%H%M%S")
+        root = base_root / f"run_{next_number:03d}_{timestamp}"
+        while root.exists():
+            next_number += 1
+            root = base_root / f"run_{next_number:03d}_{timestamp}"
     if not 0 < batch_fraction <= 1:
         raise ValueError("batch_fraction must be in (0, 1].")
     if min(extraction_chunksize, preprocessing_chunksize) <= 0:
@@ -168,12 +180,10 @@ def run_directory_batch(
         raise FileNotFoundError(f"No .csv or .csv.gz files found recursively under {source}")
     state_path = root / "run_state.json"
     log_path = root / "logs" / "pipeline.log"
-    if root.exists() and any(root.iterdir()):
-        if not resume or not state_path.is_file():
-            raise FileExistsError(
-                f"Output directory is not empty: {root}. Use --resume only if it contains "
-                "this pipeline's run_state.json, or choose a new output directory."
-            )
+    if resume and root.exists() and any(root.iterdir()) and not state_path.is_file():
+        raise FileExistsError(
+            f"Cannot resume: output directory lacks this pipeline's run_state.json: {root}"
+        )
     elif resume:
         raise FileNotFoundError(f"Cannot resume: no existing run state at {state_path}")
     root.mkdir(parents=True, exist_ok=True)
