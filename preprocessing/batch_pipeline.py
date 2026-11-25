@@ -363,7 +363,7 @@ def run_directory_batch(
                         )
                 else:
                     source_rows, rows_extracted = _write_row_fraction(
-                        source_file, extracted, fraction=batch_fraction,
+                        source_file, extracted, fraction=1.0,
                         chunksize=extraction_chunksize, max_rows=MAX_SOURCE_ROWS,
                     )
                     sampling_mode = "deterministic_first_row_fraction_per_file"
@@ -443,7 +443,7 @@ def run_directory_batch(
         "batch_fraction": batch_fraction,
         "profile_mode": profile_mode,
         "decision_engine": "deterministic_rules_v1",
-        "sampling_mode": "mimic_patient_cohort" if mimic_mode else "per_file_row_fraction",
+        "sampling_mode": "mimic_patient_cohort_with_20k_table_cap" if mimic_mode else "first_20000_rows_per_file",
         "random_seed": random_seed if mimic_mode else None,
         "patient_count": patient_count if mimic_mode else None,
         "selected_patient_count": selected_patient_count if mimic_mode else None,
@@ -465,7 +465,7 @@ def run_directory_batch(
             ["Patient-level cohort selected from patients.subject_id; dependent tables filtered by subject_id/hadm_id/stay_id. "
              "Tables without these keys are copied in full as reference tables. Verify table-specific foreign keys before downstream use."]
             if mimic_mode else
-            ["No patients table detected. A first-row fraction is extracted independently from each file; "
+            ["No patients table detected. The first 20,000 rows are extracted from each file; "
              "cross-file relational integrity is not guaranteed."]
         ),
         "audit_file": str(audit_path),
