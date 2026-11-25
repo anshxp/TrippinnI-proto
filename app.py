@@ -25,7 +25,7 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument(
         "--output-root", type=Path, default=Path("outputs/manual_batches"),
-        help="Output directory, which must be outside the source dataset directory.",
+        help="Base report directory outside the source dataset and repository. Each run creates run_NNN_YYYYMMDD_HHMMSS underneath it; use the exact run folder with --resume.",
     )
     parser.add_argument("--sample-fraction", type=float, default=0.025,
                         help="Fraction of patients/rows to extract (default: 0.025).")
