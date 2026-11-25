@@ -1,8 +1,7 @@
 """Recursive multi-table extraction and deterministic preprocessing.
 
-For MIMIC-IV, select a reproducible patient cohort and filter dependent tables
-through subject_id, hadm_id, and stay_id. For non-MIMIC folders, extract a
-deterministic 10% row window from every discovered CSV/CSV.GZ file.
+Prototype mode limits processing to the first 20,000 source rows per CSV table.
+MIMIC-IV tables are filtered using patient/encounter/stay keys within that cap.
 """
 from __future__ import annotations
 
@@ -22,6 +21,7 @@ from preprocessing.csv_runtime import count_csv_rows, run_csv_chunks
 
 
 CSV_SUFFIXES = (".csv", ".csv.gz")
+MAX_SOURCE_ROWS = 20_000  # Prototype safety cap: only read the first 20,000 rows per table
 
 
 def _is_csv(path: Path) -> bool:
@@ -56,25 +56,36 @@ def _header(path: Path) -> list[str]:
     return list(pd.read_csv(path, nrows=0).columns)
 
 
-def _read_key_set(path: Path, key: str, *, chunksize: int) -> set[str]:
+def _read_key_set(path: Path, key: str, *, chunksize: int, max_rows: int = MAX_SOURCE_ROWS) -> set[str]:
     values: set[str] = set()
+    rows_read = 0
     for frame in pd.read_csv(path, usecols=[key], dtype={key: "string"},
                              chunksize=chunksize, low_memory=False):
+        frame = frame.iloc[:max(0, max_rows - rows_read)]
         values.update(frame[key].dropna().astype(str).tolist())
+        rows_read += len(frame)
+        if rows_read >= max_rows:
+            break
     return values
 
 
 def _collect_child_keys(
-    path: Path, *, key: str, selected_subjects: set[str], chunksize: int
+    path: Path, *, key: str, selected_subjects: set[str], chunksize: int,
+    max_rows: int = MAX_SOURCE_ROWS,
 ) -> set[str]:
     keys: set[str] = set()
+    rows_read = 0
     for frame in pd.read_csv(
         path, usecols=["subject_id", key],
         dtype={"subject_id": "string", key: "string"},
         chunksize=chunksize, low_memory=False,
     ):
+        frame = frame.iloc[:max(0, max_rows - rows_read)]
         mask = frame["subject_id"].astype("string").isin(selected_subjects)
         keys.update(frame.loc[mask, key].dropna().astype(str).tolist())
+        rows_read += len(frame)
+        if rows_read >= max_rows:
+            break
     return keys
 
 
@@ -82,7 +93,7 @@ def _write_filtered(
     source: Path, destination: Path, *, key_columns: list[str],
     selected_subjects: set[str], selected_hadm: set[str],
     selected_stays: set[str], chunksize: int, logger: logging.Logger | None = None,
-    table_name: str = "",
+    table_name: str = "", max_source_rows: int = MAX_SOURCE_ROWS,
 ) -> tuple[int, int]:
     destination.parent.mkdir(parents=True, exist_ok=True)
     temp = destination.with_suffix(destination.suffix + ".tmp")
@@ -90,6 +101,9 @@ def _write_filtered(
     rows = source_rows = 0
     try:
         for frame in pd.read_csv(source, chunksize=chunksize, low_memory=False):
+            frame = frame.iloc[:max(0, max_source_rows - source_rows)]
+            if frame.empty:
+                break
             source_rows += len(frame)
             mask = pd.Series(False, index=frame.index)
             if "subject_id" in key_columns:
@@ -108,6 +122,8 @@ def _write_filtered(
                     "EXTRACTION_PROGRESS table=%s source_rows_scanned=%d rows_selected=%d",
                     table_name, source_rows, rows,
                 )
+            if source_rows >= max_source_rows:
+                break
         if rows == 0:
             pd.read_csv(source, nrows=0).to_csv(temp, index=False)
         temp.replace(destination)
@@ -118,9 +134,10 @@ def _write_filtered(
 
 
 def _write_row_fraction(
-    source: Path, destination: Path, *, fraction: float, chunksize: int
+    source: Path, destination: Path, *, fraction: float, chunksize: int,
+    max_rows: int = MAX_SOURCE_ROWS,
 ) -> tuple[int, int]:
-    total = count_csv_rows(source, chunksize=chunksize)
+    total = min(count_csv_rows(source, chunksize=chunksize), max_rows)
     if total == 0:
         destination.parent.mkdir(parents=True, exist_ok=True)
         pd.read_csv(source, nrows=0).to_csv(destination, index=False)
@@ -318,6 +335,9 @@ def run_directory_batch(
                         source_rows = 0
                         try:
                             for frame in pd.read_csv(source_file, chunksize=extraction_chunksize, low_memory=False):
+                                frame = frame.iloc[:max(0, MAX_SOURCE_ROWS - source_rows)]
+                                if frame.empty:
+                                    break
                                 frame.to_csv(temp_extracted, mode="a" if source_rows else "w",
                                              header=(source_rows == 0), index=False)
                                 source_rows += len(frame)
@@ -325,6 +345,8 @@ def run_directory_batch(
                                     "EXTRACTION_PROGRESS table=%s source_rows_scanned=%d rows_selected=%d",
                                     relative_key, source_rows, source_rows,
                                 )
+                                if source_rows >= MAX_SOURCE_ROWS:
+                                    break
                             if source_rows == 0:
                                 pd.read_csv(source_file, nrows=0).to_csv(temp_extracted, index=False)
                             temp_extracted.replace(extracted)
@@ -337,12 +359,12 @@ def run_directory_batch(
                             source_file, extracted, key_columns=key_columns,
                             selected_subjects=selected_subjects, selected_hadm=selected_hadm,
                             selected_stays=selected_stays, chunksize=extraction_chunksize,
-                            logger=logger, table_name=relative_key,
+                            logger=logger, table_name=relative_key, max_source_rows=MAX_SOURCE_ROWS,
                         )
                 else:
                     source_rows, rows_extracted = _write_row_fraction(
                         source_file, extracted, fraction=batch_fraction,
-                        chunksize=extraction_chunksize,
+                        chunksize=extraction_chunksize, max_rows=MAX_SOURCE_ROWS,
                     )
                     sampling_mode = "deterministic_first_row_fraction_per_file"
                 entry.update({"extraction_status": "complete", "source_rows": source_rows,
@@ -435,6 +457,7 @@ def run_directory_batch(
         "resume_granularity": "table_stage; a failed preprocessing table restarts from its extracted CSV",
         "log_file": str(log_path),
         "state_file": str(state_path),
+        "max_source_rows_per_table": MAX_SOURCE_ROWS,
         "rows_extracted_total": sum(item["rows_extracted"] for item in table_results),
         "rows_processed_total": sum(item["rows_processed"] for item in table_results),
         "training_label_status": "candidate_requires_review",
@@ -522,7 +545,7 @@ def run_batch(
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Recursive multi-table 10% extraction and audited preprocessing")
+    parser = argparse.ArgumentParser(description="Recursive multi-table extraction (first 20,000 rows/table) and audited preprocessing")
     parser.add_argument("input_directory", type=Path)
     parser.add_argument("--batch-fraction", type=float, default=0.025)
     parser.add_argument("--output-root", default="outputs/manual_batches")
