@@ -2,7 +2,7 @@
 Standalone profiling runner for files or directory sets.
 
 Profiles only the first --max-rows rows from each CSV/CSV.GZ file.
-Outputs profile JSONs to the user-selected output root.
+Extracts a capped CSV copy and outputs profile JSONs to the user-selected root.
 """
 from __future__ import annotations
 
@@ -135,7 +135,7 @@ def main() -> None:
             actual_rows = profile.get("dataset", {}).get("rows", 0)
             report_path = report_dir / f"{table_name}_profile.json"
             print(f"  Rows profiled: {actual_rows:,}")
-            print(f"  Profile JSON: {report_path}")
+            print(f"  Extracted prefix file: {extracted_path}")\n            print(f"  Profile JSON: {report_path}")
             successes += 1
         except Exception as exc:
             failures.append((source, f"{type(exc).__name__}: {exc}"))
