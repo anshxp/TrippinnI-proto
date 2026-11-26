@@ -123,9 +123,10 @@ class DatasetProfilerEngine:
                 "status": stats.get("status", "completed"),
                 "sample_rows": int(len(sample)),
                 "sample_scope": "bounded profile sample; not full-table outlier counts",
-                "methods": stats.get("methods", [
-                    "IQR 1.5x", "Modified Z-score (MAD)", "Isolation Forest", "LOF"
+                "configured_methods": stats.get("methods", [
+                    "iqr_1.5", "modified_z_mad_3.5", "isolation_forest", "lof"
                 ]),
+                "active_methods": stats.get("active_methods", []),
                 "eligible_features": stats.get("eligible_features", []),
                 "excluded_features": stats.get("excluded_features", {}),
                 "numeric_features": int(stats.get("numeric_features", 0)),
