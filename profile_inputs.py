@@ -10,7 +10,6 @@ from __future__ import annotations
 import argparse
 import json
 from pathlib import Path
-from typing import Iterable
 
 import pandas as pd
 
@@ -38,7 +37,7 @@ def collect_inputs(inputs: list[Path], recursive: bool) -> tuple[list[Path], dic
                 print(f"SKIP unsupported file: {source}")
                 continue
             files.append(source)
-            relative_paths[source] = Path(source.name)
+            relative_paths[source] = Path(source.parent.name) / source.name
         elif source.is_dir():
             candidates = source.rglob("*") if recursive else source.glob("*")
             for candidate in candidates:
