@@ -350,3 +350,39 @@ Deployment/reference comparison is available through QualityDetector.run(dataset
 The detector performs deterministic bootstrap resampling of the evaluated sample and measures sensitivity of the overall missingness rate. The result reports bootstrap mean, standard deviation, and range. This is a data-quality stability signal, not a full causal or model-performance robustness analysis.
 
 All thresholds are configurable in config.py. These dimensions are evaluated on the bounded detection sample when the normal MIMIC-IV pipeline is used; they should therefore be interpreted as sample-level evidence rather than exact full-table population estimates.
+
+
+## Standalone profiling of folder sets (first 20,000 rows per file)
+
+The separate profiling runner can profile individual CSV/CSV.GZ files, one folder, or multiple folders (folder sets) without launching the main batch preprocessing pipeline. It reads only the first 20,000 data rows per file by default, in chunks. You can select another row limit and an output directory.
+
+**Single folder, recursively:**
+
+```powershell
+python profile_folder_sets.py --folder "D:\\data\\mimiciv" --output "D:\\TrippinnI-profiles"
+```
+
+**Multiple folder sets:**
+
+```powershell
+python profile_folder_sets.py --folder "D:\\data\\hosp" --folder "D:\\data\\icu" --output "D:\\TrippinnI-profiles"
+```
+
+**Specific files:**
+
+```powershell
+python profile_folder_sets.py --file "D:\\data\\admissions.csv.gz" --file "D:\\data\\patients.csv" --output "D:\\TrippinnI-profiles"
+```
+
+**Change the row cap or chunk size:**
+
+```powershell
+python profile_folder_sets.py --folder "D:\\data\\mimiciv" --output "D:\\TrippinnI-profiles" --max-rows 20000 --chunk-size 2000
+```
+
+Generated profile reports are saved under:
+
+```
+<output-directory>\\reports\\profiling\\*_profile.json
+```
+The original files are not modified. CSV and CSV.GZ inputs are supported. Folder scanning is recursive by default; use `--no-recursive` to scan only files directly inside the specified folders.
