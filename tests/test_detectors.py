@@ -335,6 +335,7 @@ def test_profiler_report_embeds_bounded_outlier_summary():
     assert summary["status"] == "completed"
     assert summary["sample_scope"].startswith("bounded profile sample")
     assert summary["eligible_features"] == ["value"]
-    assert summary["methods"] == [
+    assert summary["configured_methods"] == [
         "iqr_1.5", "modified_z_mad_3.5", "isolation_forest", "lof"
     ]
+    assert "iqr" in summary["active_methods"]
