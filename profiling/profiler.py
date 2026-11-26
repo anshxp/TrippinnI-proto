@@ -4,88 +4,42 @@ import random
 
 import pandas as pd
 
-from explainability import report
 from profiling.dataset_profiler import DatasetProfiler
 from profiling.column_profiler import ColumnProfiler
 from profiling.memory_profiler import MemoryProfiler
 from profiling.key_detector import KeyDetector
 from profiling.report_builder import ReportBuilder
 from profiling.report_writer import ReportWriter
+from detectors.outlier_detector import OutlierDetector
+
 
 class DatasetProfilerEngine:
+    """Coordinates profiling and bounded-sample outlier screening."""
 
-    """
-    Coordinates the entire profiling pipeline.
-    """
+    OUTLIER_SAMPLE_CAP = 5000
+    OUTLIER_SAMPLE_SEED = 42
 
     def __init__(self):
-
         self.dataset = DatasetProfiler()
-
         self.columns = ColumnProfiler()
-
         self.memory = MemoryProfiler()
-
         self.keys = KeyDetector()
-
         self.builder = ReportBuilder()
-        
         self.writer = ReportWriter()
+        self.outliers = OutlierDetector()
 
-    #################################################################
-
-    def profile(
-
-        self,
-
-        table_name,
-
-        dataframe
-
-    ):
-
-        dataset_profile = self.dataset.profile(
-
-            table_name,
-
-            dataframe
-
-        )
-
-        column_profiles = self.columns.profile(
-
-            dataframe
-
-        )
-
-        memory_profile = self.memory.profile(
-
-            dataframe
-
-        )
-
-        key_profile = self.keys.detect(
-
-            dataframe
-
-        )
+    def profile(self, table_name, dataframe):
+        dataset_profile = self.dataset.profile(table_name, dataframe)
+        column_profiles = self.columns.profile(dataframe)
+        memory_profile = self.memory.profile(dataframe)
+        key_profile = self.keys.detect(dataframe)
 
         report = self.builder.build(
-
-            dataset_profile,
-
-            column_profiles,
-
-            memory_profile,
-
-            key_profile
-
+            dataset_profile, column_profiles, memory_profile, key_profile
         )
-
-        self.writer.save(
-            table_name,
-            report
-        )
+        detection_sample = self._bounded_sample(dataframe)
+        self._attach_outlier_summary(table_name, report, detection_sample)
+        self.writer.save(table_name, report)
         return report
 
     def profile_chunks(
@@ -95,25 +49,12 @@ class DatasetProfilerEngine:
         sample_size: int | None = None,
         sample_seed: int = 42,
     ):
-        """Profile a chunk iterator in one pass without concatenating it.
+        """Profile a chunk iterator in one pass and reservoir-sample rows.
 
-        If sample_size is given, also builds a bounded, uniformly random
-        subsample of rows (Algorithm R reservoir sampling, extended
-        from statistics.py's per-value version to whole rows) in the
-        same pass - so detection gets a real dataset-representative
-        sample without a second read of the source file.
-
-        Returns (report, sample_dataframe_or_None). sample_dataframe is
-        None if sample_size is None or the table is empty.
-
-        Note: chunk.iterrows() is used to build the reservoir, which is
-        slower than vectorized pandas ops (rough estimate: single-digit
-        seconds per million rows on typical hardware) but only runs
-        once per table regardless of dataset size. If this becomes a
-        bottleneck, it can be replaced with vectorized per-chunk
-        random-index sampling - not needed yet at prototype scale.
+        Outlier screening is run on the bounded reservoir, not the complete
+        streamed table. It is a screening summary, not a full-table count.
+        Returns (profile_report, sample_dataframe_or_None).
         """
-
         dataset_state = self.dataset.start_streaming(table_name)
         column_state = self.columns.start_streaming()
         memory_state = self.memory.start_streaming()
@@ -140,50 +81,77 @@ class DatasetProfilerEngine:
             self.memory.finalize_streaming(memory_state),
             self.keys.finalize_streaming(key_state),
         )
-        self.writer.save(table_name, report)
 
-        # iterrows() upcasts each row to a common dtype (often 'object'
-        # for mixed-type rows), so the reconstructed sample may not have
-        # the same per-column dtypes as the source chunks. Callers
-        # should re-run dtype downcasting on the sample - it's a small
-        # DataFrame at this point, so that's cheap.
         sample_dataframe = (
             pd.DataFrame(reservoir).reset_index(drop=True)
-            if reservoir
-            else None
+            if reservoir else None
+        )
+        if sample_dataframe is not None:
+            sample_dataframe = self._bounded_sample(sample_dataframe)
+        self._attach_outlier_summary(table_name, report, sample_dataframe)
+        self.writer.save(table_name, report)
+        return report, sample_dataframe
+
+    def _bounded_sample(self, dataframe: pd.DataFrame) -> pd.DataFrame:
+        if len(dataframe) <= self.OUTLIER_SAMPLE_CAP:
+            return dataframe
+        return dataframe.sample(
+            n=self.OUTLIER_SAMPLE_CAP,
+            random_state=self.OUTLIER_SAMPLE_SEED,
         )
 
-        return report, sample_dataframe
+    def _attach_outlier_summary(
+        self,
+        table_name: str,
+        profile_report: dict,
+        sample: pd.DataFrame | None,
+    ) -> None:
+        """Embed flag-only detector summaries into the profiling JSON."""
+        if sample is None or sample.empty:
+            profile_report["outlier_detection"] = {
+                "status": "not_applicable",
+                "reason": "No detection sample available",
+                "sample_rows": 0,
+                "methods": ["IQR 1.5x", "Modified Z-score (MAD)", "Isolation Forest", "LOF"],
+            }
+            return
+
+        try:
+            detection = self.outliers.detect({table_name: sample}, profile_report)
+            stats = detection.statistics.get(table_name, {})
+            profile_report["outlier_detection"] = {
+                "status": stats.get("status", "completed"),
+                "sample_rows": int(len(sample)),
+                "sample_scope": "bounded profile sample; not full-table outlier counts",
+                "methods": stats.get("methods", [
+                    "IQR 1.5x", "Modified Z-score (MAD)", "Isolation Forest", "LOF"
+                ]),
+                "eligible_features": stats.get("eligible_features", []),
+                "excluded_features": stats.get("excluded_features", {}),
+                "numeric_features": int(stats.get("numeric_features", 0)),
+                "flagged_rows_by_method": stats.get("flagged_rows_by_method", {}),
+                "method_issue_counts": stats.get("method_issue_counts", {}),
+                "rows_flagged_by_at_least_two_methods": int(
+                    stats.get("rows_flagged_by_at_least_two_methods", 0)
+                ),
+                "rows_flagged_by_at_least_three_methods": int(
+                    stats.get("rows_flagged_by_at_least_three_methods", 0)
+                ),
+                "rows_flagged_by_all_methods": int(
+                    stats.get("rows_flagged_by_all_methods", 0)
+                ),
+                "reason": stats.get("reason"),
+            }
+        except Exception as exc:
+            profile_report["outlier_detection"] = {
+                "status": "failed",
+                "sample_rows": int(len(sample)),
+                "error": str(exc),
+            }
 
     @staticmethod
     def _update_reservoir(reservoir, rows_seen, chunk, size, rng):
-        """
-        Reservoir sampling, vectorized per chunk instead of per row.
-
-        True Algorithm R decides row-by-row: each row's inclusion
-        probability is sample_size / (its global index + 1). At
-        MIMIC-IV scale (chartevents/labevents run into the hundreds of
-        millions of rows), a Python-level per-row loop is too slow -
-        plausibly tens of minutes on the largest tables. This instead:
-
-          1. Fills the reservoir directly from the first rows seen.
-          2. Once full, computes - per chunk - roughly how many of
-             this chunk's rows should replace existing entries (using
-             the chunk's average inclusion probability, size divided
-             by rows seen so far), picks that many via ONE vectorized
-             .sample() call, and swaps them into random reservoir
-             slots.
-
-        This is an approximation, not textbook-exact Algorithm R: it
-        treats every row within a chunk as having the same inclusion
-        probability (the chunk's average) rather than each row's exact
-        position-dependent one. The error from that is negligible once
-        rows_seen is large relative to chunk size - true for
-        essentially the whole run except the first chunk or two - and
-        it's the difference between building the sample in seconds
-        versus potentially tens of minutes on chartevents-scale tables.
-        """
-
+        """Approximate chunk-vectorized reservoir sampling (bounded memory)."""
         if len(reservoir) < size:
             needed = size - len(reservoir)
             take = min(needed, len(chunk))
@@ -197,11 +165,8 @@ class DatasetProfilerEngine:
 
         inclusion_prob = size / max(rows_seen + remaining, 1)
         num_replacements = min(
-            remaining,
-            size,
-            round(inclusion_prob * remaining),
+            remaining, size, round(inclusion_prob * remaining)
         )
-
         if num_replacements > 0:
             selected = chunk.sample(
                 n=num_replacements,
