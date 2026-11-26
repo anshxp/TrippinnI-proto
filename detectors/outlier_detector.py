@@ -70,16 +70,22 @@ class OutlierDetector(BaseDetector):
             # Count row-level detector agreement from flags, not issue totals:
             # univariate detectors can emit multiple column issues per row.
             flags = self._method_flags(numeric)
-            votes = flags.sum(axis=1)
+            active_methods = ["iqr", "modified_z_mad"]
+            if len(numeric) >= self.MIN_ROWS_ISOLATION_FOREST:
+                active_methods.append("isolation_forest")
+            if len(numeric) >= self.MIN_ROWS_LOF:
+                active_methods.append("lof")
+            votes = flags[active_methods].sum(axis=1)
             table_stats.update({
                 "status": "completed",
+                "active_methods": active_methods,
                 "method_issue_counts": method_counts,
                 "flagged_rows_by_method": {
-                    method: int(flags[method].sum()) for method in flags.columns
+                    method: int(flags[method].sum()) for method in active_methods
                 },
                 "rows_flagged_by_at_least_two_methods": int((votes >= 2).sum()),
                 "rows_flagged_by_at_least_three_methods": int((votes >= 3).sum()),
-                "rows_flagged_by_all_methods": int((votes == len(flags.columns)).sum()),
+                "rows_flagged_by_all_methods": int((votes == len(active_methods)).sum()),
                 "sample_rows": int(len(numeric)),
                 "numeric_features": int(numeric.shape[1]),
             })
