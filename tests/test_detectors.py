@@ -276,3 +276,65 @@ def test_advanced_quality_robustness_metric_is_reported():
 
     assert result.statistics["demo"]["robustness"]["available"] is True
     assert "missingness_range" in result.statistics["demo"]["robustness"]
+
+def test_outlier_detector_runs_selected_algorithms_and_consensus():
+    import numpy as np
+    from detectors.outlier_detector import OutlierDetector
+
+    rng = np.random.default_rng(42)
+    values = rng.normal(0, 1, 150)
+    values[-5:] = [12.0, 14.0, 16.0, 18.0, 20.0]
+    second = rng.normal(5, 1, 150)
+    second[-5:] = [20.0, 22.0, 24.0, 26.0, 28.0]
+    df = pd.DataFrame({"measurement": values, "related_measure": second})
+    profile = {
+        "columns": {
+            "measurement": {"semantic_type": "numeric"},
+            "related_measure": {"semantic_type": "numeric"},
+        }
+    }
+
+    result = OutlierDetector().detect({"demo": df}, profile)
+    stats = result.statistics["demo"]
+
+    assert stats["status"] == "completed"
+    assert stats["methods"] == [
+        "iqr_1.5", "modified_z_mad_3.5", "isolation_forest", "lof"
+    ]
+    assert stats["method_issue_counts"]["iqr"] > 0
+    assert stats["method_issue_counts"]["modified_z_mad"] > 0
+    assert "isolation_forest" in stats["flagged_rows_by_method"]
+    assert "lof" in stats["flagged_rows_by_method"]
+    assert all(issue.issue_type == "outlier" for issue in result.issues)
+
+
+def test_profiler_report_embeds_bounded_outlier_summary():
+    import numpy as np
+    from profiling.profiler import DatasetProfilerEngine
+
+    rng = np.random.default_rng(7)
+    df = pd.DataFrame({
+        "value": np.r_[rng.normal(size=100), 15.0, 20.0, 25.0],
+        "constant": [1] * 103,
+        "binary": [0, 1] * 51 + [0],
+        "subject_id": range(103),
+    })
+    profile = {
+        "columns": {
+            "value": {"semantic_type": "numeric"},
+            "constant": {"semantic_type": "numeric"},
+            "binary": {"semantic_type": "numeric"},
+            "subject_id": {"semantic_type": "identifier"},
+        }
+    }
+    engine = DatasetProfilerEngine()
+    report = {}
+    engine._attach_outlier_summary("demo", report, df)
+
+    summary = report["outlier_detection"]
+    assert summary["status"] == "completed"
+    assert summary["sample_scope"].startswith("bounded profile sample")
+    assert summary["eligible_features"] == ["value"]
+    assert summary["methods"] == [
+        "iqr_1.5", "modified_z_mad_3.5", "isolation_forest", "lof"
+    ]
