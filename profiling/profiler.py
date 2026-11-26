@@ -19,16 +19,16 @@ class DatasetProfilerEngine:
     OUTLIER_SAMPLE_CAP = 5000
     OUTLIER_SAMPLE_SEED = 42
 
-    def __init__(self):
+    def __init__(self, output_dir=None):
         self.dataset = DatasetProfiler()
         self.columns = ColumnProfiler()
         self.memory = MemoryProfiler()
         self.keys = KeyDetector()
         self.builder = ReportBuilder()
-        self.writer = ReportWriter()
+        self.writer = ReportWriter(output_dir=output_dir)
         self.outliers = OutlierDetector()
 
-    def profile(self, table_name, dataframe):
+    def profile(self, table_name, dataframe, relative_output_path=None):
         dataset_profile = self.dataset.profile(table_name, dataframe)
         column_profiles = self.columns.profile(dataframe)
         memory_profile = self.memory.profile(dataframe)
@@ -39,7 +39,7 @@ class DatasetProfilerEngine:
         )
         detection_sample = self._bounded_sample(dataframe)
         self._attach_outlier_summary(table_name, report, detection_sample)
-        self.writer.save(table_name, report)
+        self.writer.save(table_name, report, relative_path=relative_output_path)
         return report
 
     def profile_chunks(
@@ -48,6 +48,7 @@ class DatasetProfilerEngine:
         chunks,
         sample_size: int | None = None,
         sample_seed: int = 42,
+        relative_output_path=None,
     ):
         """Profile a chunk iterator in one pass and reservoir-sample rows.
 
@@ -89,7 +90,7 @@ class DatasetProfilerEngine:
         if sample_dataframe is not None:
             sample_dataframe = self._bounded_sample(sample_dataframe)
         self._attach_outlier_summary(table_name, report, sample_dataframe)
-        self.writer.save(table_name, report)
+        self.writer.save(table_name, report, relative_path=relative_output_path)
         return report, sample_dataframe
 
     def _bounded_sample(self, dataframe: pd.DataFrame) -> pd.DataFrame:
