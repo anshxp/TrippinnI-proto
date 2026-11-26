@@ -380,7 +380,7 @@ python profile_folder_sets.py --file "D:\\data\\admissions.csv.gz" --file "D:\\d
 python profile_folder_sets.py --folder "D:\\data\\mimiciv" --output "D:\\TrippinnI-profiles" --max-rows 20000 --chunk-size 2000
 ```
 
-The extracted first-row-prefix CSV copies are also written under `<output-directory>\\extracted\\<input-folder-label>\\`, preserving subfolder structure. These are new files; the source data is not modified.\n\nGenerated profile reports are saved under:
+Extracted capped CSV copies are written under `<output-directory>\\extracted\\<folder-label>\\<relative-path>`, preserving subfolder structure. Individual-file inputs are grouped under `individual_files`. These are new files; the source data is not modified.\n\nProfile reports are saved under:
 
 ```
 <output-directory>\\reports\\profiling\\*_profile.json
